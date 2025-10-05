@@ -11,4 +11,13 @@ This is why a Rust crate would make the most sense since they are freely availab
 #### Project Proposal References
 [1] Best budgeting apps in Canada for 2025, https://money.ca/managing-money/budgeting/best-budget-apps-canada (accessed Oct. 5, 2025). 
 
-[2] Setting_tracker - crates.io: Rust package registry, https://crates.io/crates/setting_tracker (accessed Oct. 5, 2025). 
+[2] Setting_tracker - crates.io: Rust package registry, https://crates.io/crates/setting_tracker (accessed Oct. 5, 2025).
+
+
+#### Plan
+| **Team Member** | **Responsibilities** | **Additional Deliverables** |
+|------------------|----------------------|------------------------------|
+| **Mohammad** | Focuses on core infrastructure and authentication, including database setup, user registration/login, and GUI setup. Ensures proper error handling and data validation across modules. | - User Guide  <br> - Demo setup and recording |
+| **Vishnu** | Leads account and transaction management. Implements account creation, transaction logging, internal transfers, recurring transactions, and categorization system for financial data. | - Reproducibility Guide  <br> - Objectives and Key Features section |
+| **Khantil** | Implements budgeting, savings, and reporting features, including the budgeting engine, savings/investment calculators, and text-based reporting/export functionality. | - Motivation and Objectives section  <br> - Lessons Learned and Conclusion |
+| **All Members** | Collaborate on initial database table schemas, conduct code reviews, and test different feature functionalities. Each feature will have one lead developer and at least one supporting developer. | — |
