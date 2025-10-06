@@ -16,6 +16,74 @@ In the modern era where there are countless ways that businesses are trying to e
 
 This is why a Rust crate would make the most sense since they are freely available and can easily be installed and used on most operating systems. The other benefit of using Rust is that Rust removes entire classes of errors such as dangling pointers, double free errors, and null pointer dereferences. These types of errors are bound to proliferate in any legacy system as they develop, however, this proposed app will be immune to it. A key limitation of existing Rust finance tracking apps is the lack of a GUI. Current implementations are limited to command line and file based I/O. [2] This is where FinanceR will fill a gap in the current ecosystem. FinanceR will implement a simple and intuitive GUI that will allow this app to be used by as many people as possible. 
 
+---
+
+# Objectives
+
+The objective of **FinanceR** is to design and implement a secure, feature-rich, and user-friendly personal finance management application built in Rust. Unlike many Rust-based tools designed in class that have been restricted to command-line interfaces, FinanceR introduces a graphical user interface (GUI) with back-end integration, making it accessible to both technical and non-technical users.  
+
+FinanceR provides a centralized platform for multi-user financial management, enabling users to create secure profiles with password authentication and access a consolidated view of their accounts, similar to existing online banking systems.  
+
+Another key goal is to deliver a comprehensive income and expense tracker. Users can log transactions manually or automate recurring entries such as bills or salaries. Categories (default or custom) will provide more granular insight into spending and income patterns, allowing for visualizations.  
+
+Finally, FinanceR will include long-term planning tools for savings and investment. Users can project growth with recurring contributions and expected returns, supported by visualizations of compounding effects.  
+
+By combining the safety and performance of Rust with an intuitive GUI, FinanceR fills a gap in the ecosystem, emphasizing security, usability, and actionable insights to improve financial decision-making.  
+
+---
+
+# Key Features
+
+To meet these objectives, FinanceR will implement a well-defined set of features organized into categories. Each feature is designed to be modular, ensuring that development tasks can be distributed among team members while still contributing to a cohesive final product.  
+
+
+
+## 1. User Authentication and Profiles
+- Multi-user access: FinanceR will support multiple users, each with a unique username and password combination. Passwords and financial data will be stored securely using hashing and encryption techniques. Additionally, each user’s financial data will be isolated to maintain privacy.
+- Onboarding flow: First-time users will be prompted to create a profile, while returning users will log in via a clean GUI login screen. Error handling will be implemented for incorrect credentials or duplicate usernames.
+
+
+
+
+## 2. Account Management
+- Multiple account types: Users can create and manage various accounts such as checking, savings, credit cards, or custom-defined accounts.
+- Dashboard view: A consolidated overview of balances across all accounts will be displayed in the GUI, mirroring the layout of a typical online banking dashboard.
+
+
+
+
+## 3. Transaction Management
+- Income and expense logging: Every financial activity can be recorded as a transaction. Transactions will include metadata such as date, amount, category, and account.
+- Recurring transactions: Users can define recurring expenses or income sources that will automatically update balances on a daily, weekly, or monthly basis. This ensures routine payments are tracked without manual entry.
+- Transfers between accounts: Support for internal transfers, such as moving money from checking to savings, distinct from external expenses or income.
+- Categorization system: Each transaction can be tagged with one or more categories. Default categories will be provided, but users will be able to define custom categories as needed.
+
+
+
+## 4. Budgeting and Expense Tracking
+- Category-specific budgets: Users can set spending limits for expense categories and income targets for revenue categories.
+- Time-based tracking: Budgets can be defined on flexible timescales (daily, weekly, monthly, yearly).
+- Spending indicators: The GUI will provide visual cues (like a progress bar) when a user approaches or exceeds their budget thresholds.
+- Interactive dashboards: Users will see breakdowns of where their money is going through charts and tables, helping them make data-driven spending adjustments.
+
+
+
+
+## 5. Savings and Investment Tools
+- Savings calculator: Users can input recurring monthly contributions and project how much will be accumulated over time.
+- Investment simulator and visualization: Users can experiment with hypothetical investment scenarios by providing expected rates of return. FinanceR will generate growth curves showing projected outcomes. These tools will be supported with line and bar charts that clearly demonstrate growth over months or years, highlighting the effects of compounding.
+  
+
+
+
+## 6. Reporting and Visualization
+- Flexible reports: Users can generate reports based on account activity, income sources, or expense categories. Reports can be filtered by time period and granularity (daily, monthly, yearly).
+- Graphical summaries: The GUI will display pie charts for expense breakdowns, line charts for income trends, and comparative bar charts for budgets.
+
+
+
+
+---
 
 ### Plan
 | **Team Member** | **Responsibilities** | **Additional Deliverables** |
