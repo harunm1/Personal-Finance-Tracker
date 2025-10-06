@@ -18,7 +18,7 @@ This is why a Rust crate would make the most sense since they are freely availab
 
 ---
 
-# Objectives
+### Objectives
 
 The objective of **FinanceR** is to design and implement a secure, feature-rich, and user-friendly personal finance management application built in Rust. Unlike many Rust-based tools designed in class that have been restricted to command-line interfaces, FinanceR introduces a graphical user interface (GUI) with back-end integration, making it accessible to both technical and non-technical users.  
 
@@ -32,27 +32,27 @@ By combining the safety and performance of Rust with an intuitive GUI, FinanceR 
 
 ---
 
-# Key Features
+### Key Features
 
 To meet these objectives, FinanceR will implement a well-defined set of features organized into categories. Each feature is designed to be modular, ensuring that development tasks can be distributed among team members while still contributing to a cohesive final product.  
 
 
 
-## 1. User Authentication and Profiles
+#### 1. User Authentication and Profiles
 - Multi-user access: FinanceR will support multiple users, each with a unique username and password combination. Passwords and financial data will be stored securely using hashing and encryption techniques. Additionally, each user’s financial data will be isolated to maintain privacy.
 - Onboarding flow: First-time users will be prompted to create a profile, while returning users will log in via a clean GUI login screen. Error handling will be implemented for incorrect credentials or duplicate usernames.
 
 
 
 
-## 2. Account Management
+#### 2. Account Management
 - Multiple account types: Users can create and manage various accounts such as checking, savings, credit cards, or custom-defined accounts.
 - Dashboard view: A consolidated overview of balances across all accounts will be displayed in the GUI, mirroring the layout of a typical online banking dashboard.
 
 
 
 
-## 3. Transaction Management
+#### 3. Transaction Management
 - Income and expense logging: Every financial activity can be recorded as a transaction. Transactions will include metadata such as date, amount, category, and account.
 - Recurring transactions: Users can define recurring expenses or income sources that will automatically update balances on a daily, weekly, or monthly basis. This ensures routine payments are tracked without manual entry.
 - Transfers between accounts: Support for internal transfers, such as moving money from checking to savings, distinct from external expenses or income.
@@ -60,7 +60,7 @@ To meet these objectives, FinanceR will implement a well-defined set of features
 
 
 
-## 4. Budgeting and Expense Tracking
+#### 4. Budgeting and Expense Tracking
 - Category-specific budgets: Users can set spending limits for expense categories and income targets for revenue categories.
 - Time-based tracking: Budgets can be defined on flexible timescales (daily, weekly, monthly, yearly).
 - Spending indicators: The GUI will provide visual cues (like a progress bar) when a user approaches or exceeds their budget thresholds.
@@ -69,14 +69,14 @@ To meet these objectives, FinanceR will implement a well-defined set of features
 
 
 
-## 5. Savings and Investment Tools
+#### 5. Savings and Investment Tools
 - Savings calculator: Users can input recurring monthly contributions and project how much will be accumulated over time.
 - Investment simulator and visualization: Users can experiment with hypothetical investment scenarios by providing expected rates of return. FinanceR will generate growth curves showing projected outcomes. These tools will be supported with line and bar charts that clearly demonstrate growth over months or years, highlighting the effects of compounding.
   
 
 
 
-## 6. Reporting and Visualization
+#### 6. Reporting and Visualization
 - Flexible reports: Users can generate reports based on account activity, income sources, or expense categories. Reports can be filtered by time period and granularity (daily, monthly, yearly).
 - Graphical summaries: The GUI will display pie charts for expense breakdowns, line charts for income trends, and comparative bar charts for budgets.
 
