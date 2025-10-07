@@ -85,12 +85,53 @@ To meet these objectives, FinanceR will implement a well-defined set of features
 
 ---
 
-### Plan
+### Tentative Plan
+
+#### **Project Phase Plan**
+
+The development of FinanceR will follow a modular and time-efficient approach to ensure all major features are implemented and tested before the December 15th deadline. Each phase builds on the previous one , ensuring the system remains stable, maintainable, and cohesive throughout development. The GUI will be built as each feature is completed in the backend.
+
+---
+
+#### **Phase 1 – Foundation Setup (October 14 – October 20)**
+The project will begin with the initial setup of the Rust environment and Git repository. The database schema for users, accounts, and transactions will be designed and tested for consistency.  
+For the purposes of this project, we will use a **local database**.  
+This phase will also establish the basic file structure, configuration, and data models needed for modular development. Input/output handling will be set up to maintain and show user presence and initial session state.
+
+---
+
+#### **Phase 2 – Authentication and User Profiles (October 21 – October 31)**
+This phase focuses on implementing secure user registration and login. Features such as password hashing, input validation, and error handling will ensure data integrity and user privacy. Each user will have a unique, isolated data profile, forming the core of the multi-user architecture.
+
+---
+
+#### **Phase 3 – Account and Transaction Management (November 1 – November 10)**
+Users will be able to create and manage multiple account types, such as checking, savings, or custom accounts. Transaction logging, internal transfers, and recurring transactions will be implemented to automate common financial actions and maintain accurate account balances.
+
+---
+
+#### **Phase 4 – Budgeting and Expense Tracking (November 11 – November 20)**
+The budgeting module will allow users to set category-specific spending limits and income goals. The system will track these metrics over flexible timescales and alert users when thresholds are approached. Recurring income and expenses will be integrated for accurate financial forecasting.
+
+---
+
+#### **Phase 5 – Reporting and Visualization (November 21 – November 30)**
+Reporting tools will enable users to generate text-based summaries by date, account, or category. Financial insights such as expense breakdowns and income trends will be displayed clearly to support user decision-making.
+
+---
+
+#### **Phase 6 – Testing, Integration, and Documentation (December 1 – December 15)**
+The final phase will focus on end-to-end testing, debugging, and performance optimization. Full system integration will be verified across modules. Comprehensive documentation—including the **User Guide Write-Up**, reproducibility report, and final demo preparation—will be completed before submission.
+
+---
+
+#### **Team Responsibilities**
+
 | **Team Member** | **Responsibilities** | **Additional Deliverables** |
 |------------------|----------------------|------------------------------|
-| **Mohammad** | Focuses on core infrastructure and authentication, including database setup, user registration/login, and GUI setup. Ensures proper error handling and data validation across modules. | - User Guide  <br> - Demo setup and recording |
-| **Vishnu** | Leads account and transaction management. Implements account creation, transaction logging, internal transfers, recurring transactions, and categorization system for financial data. | - Reproducibility Guide  <br> - Objectives and Key Features section |
-| **Khantil** | Implements budgeting, savings, and reporting features, including the budgeting engine, savings/investment calculators, and text-based reporting/export functionality. | - Motivation and Objectives section  <br> - Lessons Learned and Conclusion |
+| **Mohammad** | Focuses on core infrastructure and authentication, including database setup, user registration/login, and GUI setup. Ensures proper error handling and data validation across modules. | - User Guide Write-up  <br> - Demo setup and recording |
+| **Vishnu** | Leads account and transaction management. Implements account creation, transaction logging, internal transfers, recurring transactions, and categorization system for financial data. | - Reproducibility Guide Write-up  <br> - Objectives and Key Features section |
+| **Khantil** | Implements budgeting, savings, and reporting features, including the budgeting engine, savings/investment calculators, and text-based reporting/export functionality. | - Motivation and Objectives Write-up  <br> - Lessons Learned and Conclusion Write-up |
 | **All Members** | Collaborate on initial database table schemas, conduct code reviews, and test different feature functionalities. Each feature will have one lead developer and at least one supporting developer. | On a rotational basis each team member will lead a weekly sync up to give any updates and blockers. |
 
 ### Project Proposal References
