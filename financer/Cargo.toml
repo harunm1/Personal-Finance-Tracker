@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 eframe = "0.24"
-diesel = { version = "2.1", features = ["sqlite"] }
+diesel = { version = "2.3.3", features = ["sqlite"] }
 argon2 = "0.5"
+password-hash = "0.5"
 rand = "0.8"
+dotenv = "0.15"
