@@ -1,7 +1,7 @@
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::Error;
-use crate::models::{User, NewUser};
+use crate::models::{User, NewUser, NewAccount, NewContact, NewTransaction, AccountType};
 use crate::schema::users::dsl::*;
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use ::password_hash::{SaltString, PasswordHash};
@@ -41,3 +41,4 @@ pub fn verify_user(conn: &mut SqliteConnection, login_username: &str, login_pass
         Err(e) => Err(e),
     }
 }
+
