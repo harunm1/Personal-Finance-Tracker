@@ -3,6 +3,9 @@ use diesel::sqlite::SqliteConnection;
 use diesel::result::Error;
 use crate::models::{User, NewUser, NewAccount, NewContact, NewTransaction, AccountType};
 use crate::schema::users::dsl::*;
+use crate::schema::accounts::dsl::*;
+use crate::schema::contacts::dsl::*;
+use crate::schema::transactions::dsl::*;
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use ::password_hash::{SaltString, PasswordHash};
 
@@ -26,12 +29,41 @@ pub fn create_user(conn: &mut SqliteConnection, new_username: &str, new_password
     diesel::insert_into(users).values(&new_user).execute(conn)
 }
 
+pub fn create_account(conn: &mut SqliteConnection, new_name: &str, new_account_type: &str, new_balance: f32) -> Result<usize, Error> {
+    let new_account = NewAccount {
+        name: new_name,
+        account_type: new_account_type,
+        balance: new_balance,
+    };
+
+    diesel::insert_into(accounts).values(&new_account).execute(conn)
+}
+
+pub fn create_contact(conn: &mut SqliteConnection, new_name: &str, new_user: i32) -> Result<usize, Error> {
+    let new_contact = NewContact {
+        name: new_name,
+        user: new_user,
+    };
+
+    diesel::insert_into(contacts).values(&new_contact).execute(conn)
+}
+
+pub fn create_transaction(conn: &mut SqliteConnection, new_user_account: i32, new_contact_id: i32, new_amount: f32) -> Result<usize, Error> {
+    let new_transaction = NewTransaction {
+        user_account_id: new_user_account,
+        contact_id: new_contact_id,
+        amount: new_amount,
+    };
+    
+    diesel::insert_into(transactions).values(&new_transaction).execute(conn)
+}
+
 pub fn verify_user(conn: &mut SqliteConnection, login_username: &str, login_password: &str) -> Result<bool, Error> {
     // Try to find username
     match users.filter(username.eq(login_username)).first::<User>(conn){
-        Ok(user) => {
+        Ok(u) => {
             // Verify the hashed password
-            let parsed_hash = PasswordHash::new(&user.password_hash).expect("Error parsing password hash");
+            let parsed_hash = PasswordHash::new(&u.password_hash).expect("Error parsing password hash");
             let argon2 = Argon2::default();
             Ok(argon2.verify_password(login_password.as_bytes(), &parsed_hash).is_ok())
         }
