@@ -46,6 +46,7 @@ pub struct Account {
     pub name: String,
     pub account_type: String,
     pub balance: f32,
+    pub user_id: i32,
 }
 
 #[derive(Debug, Insertable)]
@@ -54,6 +55,7 @@ pub struct NewAccount<'a> {
     pub name: &'a str,
     pub account_type: &'a str,
     pub balance: f32,
+    pub user_id: i32,
 }
 #[derive(Debug, Queryable)]
 pub struct User {

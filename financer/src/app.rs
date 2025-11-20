@@ -2,6 +2,7 @@ use eframe::egui;
 use crate::db;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::{Error, DatabaseErrorKind};
+use crate::models::Account;
 
 pub enum AppState {
     Login,
@@ -11,11 +12,16 @@ pub enum AppState {
 
 pub struct FinancerApp {
     username: String,
+    user_id: Option<i32>, //initially there wont be a value until the user logs in
     password: String,
     email: String,
     message: String,
     screen: AppState,
     conn: SqliteConnection,
+    accounts_list: Vec<Account>,
+    new_account_name: String,
+    new_account_type: String,   
+    new_account_balance: f32,
 }
 
 impl FinancerApp {
@@ -27,6 +33,11 @@ impl FinancerApp {
             message: String::new(),
             screen: AppState::Login,
             conn,
+            user_id: None,
+            accounts_list: Vec::new(),
+            new_account_name: String::new(),
+            new_account_type: String::new(),
+            new_account_balance: 0.0,
         }
     }
 
@@ -43,6 +54,12 @@ impl FinancerApp {
             if ui.button("Login").clicked() {
                 match db::verify_user(&mut self.conn, &self.username, &self.password) {
                     Ok(true) => {
+                        // get user_id
+                        self.user_id = db::get_userid_by_username(&mut self.conn, &self.username).ok().map(|u| u.id);
+                        // load user accounts
+                        if let Some(uid) = self.user_id {
+                            self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                        }
                         self.message.clear();
                         self.screen = AppState::Dashboard;
                     }
@@ -118,10 +135,65 @@ impl FinancerApp {
             ui.heading("FinanceR Dashboard");
             ui.label(format!("Logged in as: {}", self.username));
 
+            ui.separator();
+            ui.heading("Your Accounts:");
+
+            if self.accounts_list.is_empty() {
+                ui.label("No accounts found. Please create one.");
+            } else {
+                for account in &self.accounts_list {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{} - {}: ${:.2}", account.name, account.account_type, account.balance));
+                    });
+                }
+            }
+
+            ui.separator();
+            ui.heading("Create New Account:");
+
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                ui.text_edit_singleline(&mut self.new_account_name);
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Type:");
+                ui.text_edit_singleline(&mut self.new_account_type);
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Balance:");
+                ui.add(egui::DragValue::new(&mut self.new_account_balance).speed(1.0));
+            });
+
+            if ui.button("Create Account").clicked() {
+                if let Some(uid) = self.user_id {
+                    match db::create_account(&mut self.conn, &self.new_account_name, &self.new_account_type, self.new_account_balance, uid) {
+                        Ok(_) => {
+                            self.message = "Account created successfully.".to_string();
+                            // Refresh account list
+                            self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                            // Clear input fields
+                            self.new_account_name.clear();
+                            self.new_account_type.clear();
+                            self.new_account_balance = 0.0;
+                        }
+                        Err(e) => {
+                            self.message = format!("Failed to create account: {}", e);
+                        }
+                    }
+                } 
+            }
+
+            ui.separator();
+            ui.label(&self.message);
+
             if ui.button("Logout").clicked() {
                 self.screen = AppState::Login;
                 self.username.clear();
                 self.password.clear();
+                self.user_id = None;
+                self.accounts_list.clear();
                 self.message.clear();
             }
         });
