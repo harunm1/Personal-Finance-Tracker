@@ -1,6 +1,7 @@
 use eframe::egui;
 use crate::db;
 use diesel::sqlite::SqliteConnection;
+use diesel::result::{Error, DatabaseErrorKind};
 
 pub enum AppState {
     Login,
@@ -76,6 +77,11 @@ impl FinancerApp {
             ui.add(egui::TextEdit::singleline(&mut self.password).password(true));
 
             if ui.button("Create account").clicked() {
+                if self.username.is_empty() || self.password.is_empty() {
+                    self.message = "Username and password cannot be empty.".to_string();
+                    return;
+                }
+
                 match db::create_user(&mut self.conn, &self.username, &self.password, Some(&self.email)) {
                     Ok(_) => {
                         self.message = "Account created! Now you can login".to_string();
@@ -83,6 +89,13 @@ impl FinancerApp {
                         self.username.clear();
                         self.password.clear();
                         self.email.clear();
+                    }
+                    Err(Error::DatabaseError(kind, _)) => {
+                        self.message = match kind {
+                            DatabaseErrorKind::UniqueViolation => "Username or email already exists.".to_string(),
+                            _ => "Database error occurred.".to_string(),
+                        }
+
                     }
                     Err(e) => {
                         self.message = format!("Failed to create account: {}", e);
@@ -96,7 +109,7 @@ impl FinancerApp {
             }
 
             ui.separator();
-            ui.label(&self.message)
+            ui.label(&self.message);
         });
     }
 

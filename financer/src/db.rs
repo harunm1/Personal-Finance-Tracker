@@ -8,6 +8,7 @@ use crate::schema::contacts::dsl::*;
 use crate::schema::transactions::dsl::*;
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use ::password_hash::{SaltString, PasswordHash};
+use email_address::EmailAddress;
 
 pub fn establish_connection() -> SqliteConnection {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
@@ -15,6 +16,18 @@ pub fn establish_connection() -> SqliteConnection {
 }
 
 pub fn create_user(conn: &mut SqliteConnection, new_username: &str, new_password: &str, new_email: Option<&str>) -> Result<usize, Error> {
+    // check if user already exists
+    if users.filter(username.eq(new_username)).first::<User>(conn).optional()?.is_some() {
+        println!("User already exists: {}", new_username);
+        return Err(Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, Box::new("Username already exists".to_string())));
+    }
+    // validate email if provided
+    if let Some(email_str) = new_email {
+        if !EmailAddress::is_valid(email_str) {
+            println!("Invalid email format: {}", email_str);
+            return Err(Error::DatabaseError(diesel::result::DatabaseErrorKind::Unknown, Box::new("Invalid email format".to_string())));
+        }
+    }
     // Hash the password
     let salt = SaltString::generate(&mut rand::thread_rng());
     let argon2 = Argon2::default();
