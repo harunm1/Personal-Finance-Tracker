@@ -1,7 +1,7 @@
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::Error;
-use crate::models::{User, NewUser, NewAccount, NewContact, NewTransaction, AccountType};
+use crate::models::{User, NewUser, NewAccount, NewContact, NewTransaction, AccountType, Account};
 use crate::schema::users::dsl::*;
 use crate::schema::accounts::dsl::*;
 use crate::schema::contacts::dsl::*;
@@ -42,14 +42,23 @@ pub fn create_user(conn: &mut SqliteConnection, new_username: &str, new_password
     diesel::insert_into(users).values(&new_user).execute(conn)
 }
 
-pub fn create_account(conn: &mut SqliteConnection, new_name: &str, new_account_type: &str, new_balance: f32) -> Result<usize, Error> {
+pub fn create_account(conn: &mut SqliteConnection, new_name: &str, new_account_type: &str, new_balance: f32, account_owner_id: i32) -> Result<usize, Error> {
     let new_account = NewAccount {
         name: new_name,
         account_type: new_account_type,
         balance: new_balance,
+        user_id: account_owner_id,
     };
 
     diesel::insert_into(accounts).values(&new_account).execute(conn)
+}
+
+pub fn get_user_accounts(conn: &mut SqliteConnection, owner_id: i32) -> Result<Vec<Account>, Error> {
+    accounts.filter(user_id.eq(owner_id)).load::<Account>(conn)
+}
+
+pub fn get_userid_by_username(conn: &mut SqliteConnection, search_username: &str) -> Result<User, Error> {
+    users.filter(username.eq(search_username)).first::<User>(conn)
 }
 
 pub fn create_contact(conn: &mut SqliteConnection, new_name: &str, new_user: i32) -> Result<usize, Error> {
