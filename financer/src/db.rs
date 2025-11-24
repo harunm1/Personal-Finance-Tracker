@@ -166,8 +166,7 @@ pub fn update_budget(conn: &mut SqliteConnection, budget_id: i32, changes: NewBu
 pub fn delete_budget(conn: &mut SqliteConnection, budget_id: i32) -> Result<usize, Error> {
     use crate::schema::budgets::dsl::*;
     
-    diesel::update(budgets.filter(id.eq(budget_id)))
-        .set(active.eq(false))
+    diesel::delete(budgets.filter(id.eq(budget_id)))
         .execute(conn)
 }
 
