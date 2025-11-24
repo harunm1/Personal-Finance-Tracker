@@ -69,6 +69,8 @@ pub struct FinancerApp {
     tx_editor_category: String,
     tx_editor_date: String,
     tx_editor_is_expense: bool,
+    // Transaction filter
+    tx_filter_account_id: Option<i32>,
 }
 
 impl FinancerApp {
@@ -113,6 +115,8 @@ impl FinancerApp {
             tx_editor_category: DEFAULT_CATEGORIES[0].to_string(),
             tx_editor_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
             tx_editor_is_expense: true,
+            // Transaction filter initialization
+            tx_filter_account_id: None,
         }
     }
 
@@ -840,17 +844,53 @@ impl FinancerApp {
             ui.label(&self.message);
 
             ui.separator();
-            ui.heading("Transaction History");
+            
+            // Filter section
+            ui.horizontal(|ui| {
+                ui.heading("Transaction History");
+                ui.separator();
+                ui.label("Filter by Account:");
+                egui::ComboBox::from_id_source("tx_filter_account")
+                    .selected_text(
+                        if let Some(filter_id) = self.tx_filter_account_id {
+                            self.accounts_list
+                                .iter()
+                                .find(|a| a.id == filter_id)
+                                .map(|a| a.name.as_str())
+                                .unwrap_or("All Accounts")
+                        } else {
+                            "All Accounts"
+                        }
+                    )
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.tx_filter_account_id, None, "All Accounts");
+                        ui.separator();
+                        for account in &self.accounts_list {
+                            ui.selectable_value(&mut self.tx_filter_account_id, Some(account.id), &account.name);
+                        }
+                    });
+            });
 
-            // Transaction list
+            // Transaction list with filtering
             let mut tx_to_edit: Option<Transaction> = None;
             let mut tx_to_delete: Option<i32> = None;
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-                if self.transactions_list.is_empty() {
-                    ui.label("No transactions yet. Add one above!");
+                let filtered_transactions: Vec<&Transaction> = self.transactions_list
+                    .iter()
+                    .filter(|tx| {
+                        if let Some(filter_id) = self.tx_filter_account_id {
+                            tx.user_account_id == filter_id
+                        } else {
+                            true
+                        }
+                    })
+                    .collect();
+
+                if filtered_transactions.is_empty() {
+                    ui.label("No transactions match the filter.");
                 } else {
-                    for tx in &self.transactions_list {
+                    for tx in filtered_transactions {
                         let account_name = self.accounts_list
                             .iter()
                             .find(|a| a.id == tx.user_account_id)
@@ -900,7 +940,7 @@ impl FinancerApp {
                     self.load_user_transactions();
                     self.load_user_budgets();
                     self.compute_budget_progress(self.period_offset);
-                    
+
                     // Reload accounts to show updated balance
                     if let Some(uid) = self.user_id {
                         self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
