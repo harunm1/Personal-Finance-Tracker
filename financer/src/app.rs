@@ -16,6 +16,7 @@ const DEFAULT_CATEGORIES: &[&str] = &[
     "Rent/Mortgage",
     "Healthcare",
     "Income",
+    "Transfer",
     "Other",
 ];
 use chrono::NaiveDateTime;
@@ -27,6 +28,7 @@ pub enum AppState {
     Dashboard,
     Budgeting,
     Transactions,
+    Transfers,
 }
 
 pub struct FinancerApp {
@@ -72,6 +74,11 @@ pub struct FinancerApp {
     // Transaction filter
     tx_filter_account_id: Option<i32>,
     tx_filter_category: Option<String>,
+    // Transfer fields
+    transfer_from_account_id: i32,
+    transfer_to_account_id: i32,
+    transfer_amount: f32,
+    transfer_date: String,
 }
 
 impl FinancerApp {
@@ -119,6 +126,11 @@ impl FinancerApp {
             // Transaction filter initialization
             tx_filter_account_id: None,
             tx_filter_category: None,
+            // Transfer initialization
+            transfer_from_account_id: 0,
+            transfer_to_account_id: 0,
+            transfer_amount: 0.0,
+            transfer_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
         }
     }
 
@@ -321,6 +333,11 @@ impl FinancerApp {
                 self.screen = AppState::Transactions;
                 self.load_user_transactions();
                 self.load_user_categories();
+            }
+
+            if ui.button("Transfers").clicked() {
+                self.screen = AppState::Transfers;
+                self.load_user_transactions();
             }
         });
     }
@@ -1112,6 +1129,166 @@ impl FinancerApp {
         }
     }
 
+    fn show_transfers(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Account Transfers");
+
+            ui.horizontal(|ui| {
+                if ui.button("Back to Dashboard").clicked() {
+                    self.screen = AppState::Dashboard;
+                }
+            });
+
+            ui.separator();
+            ui.heading("Create Transfer");
+
+            // From Account selector
+            ui.horizontal(|ui| {
+                ui.label("From Account:");
+                egui::ComboBox::from_id_source("transfer_from_account")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.transfer_from_account_id)
+                            .map(|a| format!("{} (${:.2})", a.name, a.balance))
+                            .unwrap_or_else(|| "Select Account".to_string())
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            ui.selectable_value(
+                                &mut self.transfer_from_account_id,
+                                account.id,
+                                format!("{} (${:.2})", account.name, account.balance)
+                            );
+                        }
+                    });
+            });
+
+            // To Account selector
+            ui.horizontal(|ui| {
+                ui.label("To Account:");
+                egui::ComboBox::from_id_source("transfer_to_account")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.transfer_to_account_id)
+                            .map(|a| format!("{} (${:.2})", a.name, a.balance))
+                            .unwrap_or_else(|| "Select Account".to_string())
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            // Don't allow selecting the same account as source
+                            if account.id != self.transfer_from_account_id {
+                                ui.selectable_value(
+                                    &mut self.transfer_to_account_id,
+                                    account.id,
+                                    format!("{} (${:.2})", account.name, account.balance)
+                                );
+                            }
+                        }
+                    });
+            });
+
+            // Amount
+            ui.horizontal(|ui| {
+                ui.label("Amount:");
+                ui.add(egui::DragValue::new(&mut self.transfer_amount).speed(1.0).prefix("$"));
+            });
+
+            // Date
+            ui.horizontal(|ui| {
+                ui.label("Date:");
+                ui.text_edit_singleline(&mut self.transfer_date);
+                ui.label("(YYYY-MM-DD)");
+            });
+
+            // Transfer button
+            if ui.button("Execute Transfer").clicked() {
+                if self.transfer_from_account_id > 0 
+                    && self.transfer_to_account_id > 0 
+                    && self.transfer_from_account_id != self.transfer_to_account_id
+                    && self.transfer_amount > 0.0 {
+                    
+                    let date_time = format!("{} 00:00:00", self.transfer_date);
+                    
+                    match db::create_transfer(
+                        &mut self.conn,
+                        self.transfer_from_account_id,
+                        self.transfer_to_account_id,
+                        self.transfer_amount,
+                        date_time,
+                    ) {
+                        Ok(_) => {
+                            self.message = format!(
+                                "Transfer of ${:.2} completed successfully!",
+                                self.transfer_amount
+                            );
+                            self.load_user_transactions();
+                            self.load_user_budgets();
+                            self.compute_budget_progress(self.period_offset);
+                            
+                            // Reload accounts to show updated balances
+                            if let Some(uid) = self.user_id {
+                                self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                            }
+                            
+                            // Reset form
+                            self.transfer_amount = 0.0;
+                        }
+                        Err(e) => {
+                            self.message = format!("Transfer failed: {:?}", e);
+                        }
+                    }
+                } else if self.transfer_from_account_id == self.transfer_to_account_id {
+                    self.message = "Cannot transfer to the same account.".to_string();
+                } else {
+                    self.message = "Please select both accounts and enter a positive amount.".to_string();
+                }
+            }
+
+            ui.separator();
+            ui.label(&self.message);
+
+            ui.separator();
+            ui.heading("Transfer History");
+
+            // Show only Transfer transactions
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let transfer_transactions: Vec<&Transaction> = self.transactions_list
+                    .iter()
+                    .filter(|tx| tx.category == "Transfer")
+                    .collect();
+
+                if transfer_transactions.is_empty() {
+                    ui.label("No transfers yet.");
+                } else {
+                    for tx in transfer_transactions {
+                        let account_name = self.accounts_list
+                            .iter()
+                            .find(|a| a.id == tx.user_account_id)
+                            .map(|a| a.name.as_str())
+                            .unwrap_or("Unknown");
+                        
+                        let color = if tx.amount >= 0.0 {
+                            egui::Color32::from_rgb(50, 200, 50)
+                        } else {
+                            egui::Color32::from_rgb(200, 50, 50)
+                        };
+
+                        let transfer_type = if tx.amount >= 0.0 { "TO" } else { "FROM" };
+
+                        ui.horizontal(|ui| {
+                            ui.colored_label(color, format!("${:.2}", tx.amount.abs()));
+                            ui.label(format!("| {} {} | {} | Balance: ${:.2}", 
+                                transfer_type, account_name, tx.date, tx.balance_after));
+                        });
+                        ui.separator();
+                    }
+                }
+            });
+        });
+    }
+
 }
 
 impl eframe::App for FinancerApp {
@@ -1122,6 +1299,7 @@ impl eframe::App for FinancerApp {
             AppState::Dashboard => self.show_dashboard(ctx),
             AppState::Budgeting => self.show_budgets(ctx),
             AppState::Transactions => self.show_transactions(ctx),
+            AppState::Transfers => self.show_transfers(ctx),
         }
     }
 }

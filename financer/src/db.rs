@@ -108,6 +108,39 @@ pub fn create_transaction(
     Ok(result)
 }
 
+pub fn create_transfer(
+    conn: &mut SqliteConnection,
+    from_account_id: i32,
+    to_account_id: i32,
+    transfer_amount: f32,
+    transfer_date: String,
+) -> Result<(), Error> {
+    // Use a transaction to ensure atomicity
+    conn.transaction::<_, Error, _>(|conn| {
+        // Create withdrawal from source account
+        create_transaction(
+            conn,
+            from_account_id,
+            0, // no contact
+            -transfer_amount.abs(), // negative for withdrawal
+            "Transfer".to_string(),
+            transfer_date.clone(),
+        )?;
+        
+        // Create deposit to destination account
+        create_transaction(
+            conn,
+            to_account_id,
+            0, // no contact
+            transfer_amount.abs(), // positive for deposit
+            "Transfer".to_string(),
+            transfer_date,
+        )?;
+        
+        Ok(())
+    })
+}
+
 pub fn verify_user(conn: &mut SqliteConnection, login_username: &str, login_password: &str) -> Result<bool, Error> {
     // Try to find username
     match users.filter(username.eq(login_username)).first::<User>(conn){
