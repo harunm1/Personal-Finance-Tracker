@@ -415,16 +415,32 @@ impl FinancerApp {
 
             ui.separator();
 
-            ui.label(format!("Period: {:?}", self.selected_budget_period));
-
+            // Time navigation controls
             if ui.button("Prev").clicked() {
-                // shift the offset and recompute
                 self.period_offset -= 1;
                 self.compute_budget_progress(self.period_offset);
             }
+            
+            // Show current viewing status
+            let offset_text = match self.period_offset {
+                0 => "Current Period".to_string(),
+                1 => "1 period ahead".to_string(),
+                -1 => "1 period ago".to_string(),
+                n if n > 0 => format!("{} periods ahead", n),
+                n => format!("{} periods ago", n.abs()),
+            };
+            ui.label(egui::RichText::new(&offset_text).strong());
+            
             if ui.button("Next").clicked() {
                 self.period_offset += 1;
                 self.compute_budget_progress(self.period_offset);
+            }
+            
+            if self.period_offset != 0 {
+                if ui.button("Reset to Current").clicked() {
+                    self.period_offset = 0;
+                    self.compute_budget_progress(self.period_offset);
+                }
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -452,6 +468,15 @@ impl FinancerApp {
                     .get(&b.id.unwrap_or(0))
                     .cloned()
                     .unwrap_or((0, b.limit_cents));
+
+                // Calculate date range for this budget to display
+                let budget_period = crate::models::Period::from_str(&b.period);
+                let (start_date, end_date) = Self::get_period_range(budget_period, self.period_offset);
+                let date_range_str = format!(
+                    "{} - {}",
+                    start_date.format("%b %d, %Y"),
+                    end_date.format("%b %d, %Y")
+                );
 
                 // Interpret spent based on target type
                 let target_type = crate::models::TargetType::from_str(&b.target_type);
@@ -496,6 +521,8 @@ impl FinancerApp {
                         self.editor_open = true;
                     }
                 });
+                
+                ui.label(egui::RichText::new(&date_range_str).small().italics());
                 
                 ui.horizontal(|ui| {
                     ui.add_sized(
