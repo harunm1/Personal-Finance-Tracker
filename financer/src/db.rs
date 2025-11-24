@@ -1,7 +1,7 @@
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::Error;
-use crate::models::{User, NewUser, NewAccount, NewContact, NewTransaction, AccountType, Account};
+use crate::models::{User, NewUser, NewAccount, NewContact, NewTransaction, Account, Transaction};
 use crate::schema::users::dsl::*;
 use crate::schema::accounts::dsl::*;
 use crate::schema::contacts::dsl::*;
@@ -9,6 +9,10 @@ use crate::schema::transactions::dsl::*;
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use ::password_hash::{SaltString, PasswordHash};
 use email_address::EmailAddress;
+
+use crate::models::{Budget, NewBudget};
+use chrono::NaiveDateTime;
+use diesel::dsl::sum;
 
 pub fn establish_connection() -> SqliteConnection {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
@@ -70,14 +74,38 @@ pub fn create_contact(conn: &mut SqliteConnection, new_name: &str, new_user: i32
     diesel::insert_into(contacts).values(&new_contact).execute(conn)
 }
 
-pub fn create_transaction(conn: &mut SqliteConnection, new_user_account: i32, new_contact_id: i32, new_amount: f32) -> Result<usize, Error> {
+pub fn create_transaction(
+    conn: &mut SqliteConnection,
+    new_user_account: i32,
+    new_contact_id: i32,
+    new_amount: f32,
+    new_category: String,
+    new_date: String,
+) -> Result<usize, Error> {
+    use crate::schema::accounts::dsl::*;
+    
+    let cents = (new_amount * 100.0) as i32;
+    
+    // Get current account balance
+    let current_account: Account = accounts.filter(id.eq(new_user_account)).first(conn)?;
+    let new_balance = current_account.balance + new_amount;
+    
     let new_transaction = NewTransaction {
         user_account_id: new_user_account,
         contact_id: new_contact_id,
         amount: new_amount,
+        category: new_category,
+        date: new_date,
+        amount_cents: cents,
+        balance_after: new_balance,
     };
     
-    diesel::insert_into(transactions).values(&new_transaction).execute(conn)
+    let result = diesel::insert_into(transactions).values(&new_transaction).execute(conn)?;
+    
+    // Update account balance
+    update_account_balance(conn, new_user_account, new_amount)?;
+    
+    Ok(result)
 }
 
 pub fn verify_user(conn: &mut SqliteConnection, login_username: &str, login_password: &str) -> Result<bool, Error> {
@@ -96,3 +124,224 @@ pub fn verify_user(conn: &mut SqliteConnection, login_username: &str, login_pass
     }
 }
 
+
+
+
+//Budgeting functions
+
+pub fn create_budget(conn: &mut SqliteConnection, new_budget: NewBudget) -> Result<Budget, Error> {
+    use crate::schema::budgets::dsl::*;
+    
+    diesel::insert_into(budgets)
+        .values(&new_budget)
+        .execute(conn)?;
+    
+    budgets.order(id.desc()).first(conn)
+}
+
+pub fn get_user_budgets(conn: &mut SqliteConnection, owner_id: i32) -> Result<Vec<Budget>, Error> {
+    use crate::schema::budgets::dsl::*;
+    
+    budgets
+        .filter(user_id.eq(owner_id))
+        .filter(active.eq(true))
+        .load::<Budget>(conn)
+}
+
+pub fn update_budget(conn: &mut SqliteConnection, budget_id: i32, changes: NewBudget) -> Result<Budget, Error> {
+    use crate::schema::budgets::dsl::*;
+    
+    diesel::update(budgets.filter(id.eq(budget_id)))
+        .set((
+            category.eq(&changes.category),
+            limit_cents.eq(&changes.limit_cents),
+            period.eq(&changes.period),
+            target_type.eq(&changes.target_type),
+        ))
+        .execute(conn)?;
+    
+    budgets.filter(id.eq(budget_id)).first(conn)
+}
+
+pub fn delete_budget(conn: &mut SqliteConnection, budget_id: i32) -> Result<usize, Error> {
+    use crate::schema::budgets::dsl::*;
+    
+    diesel::update(budgets.filter(id.eq(budget_id)))
+        .set(active.eq(false))
+        .execute(conn)
+}
+
+// Aggregation: total spent/received in a period for a category across all user accounts.
+pub fn get_spend_for_category_period(
+    conn: &mut SqliteConnection,
+    owner_id: i32,
+    cat: &str,
+    start: NaiveDateTime,
+    end: NaiveDateTime,
+) -> Result<i64, Error> {
+    use crate::schema::transactions::dsl::*;
+    use crate::schema::accounts;
+    
+    let start_str = start.format("%Y-%m-%d %H:%M:%S").to_string();
+    let end_str = end.format("%Y-%m-%d %H:%M:%S").to_string();
+    
+    let result: Option<Option<i64>> = transactions
+        .inner_join(accounts::table.on(user_account_id.eq(accounts::id)))
+        .filter(accounts::user_id.eq(owner_id))
+        .filter(category.eq(cat))
+        .filter(date.ge(start_str))
+        .filter(date.lt(end_str))
+        .select(sum(amount_cents))
+        .first(conn)
+        .optional()?;
+    
+    Ok(result.flatten().unwrap_or(0))
+}
+
+pub fn get_spend_by_category_period(
+    conn: &mut SqliteConnection,
+    owner_id: i32,
+    start: NaiveDateTime,
+    end: NaiveDateTime,
+) -> Result<Vec<(String, i64)>, Error> {
+    use crate::schema::transactions::dsl::*;
+    use crate::schema::accounts;
+    use diesel::dsl::sum;
+    
+    let start_str = start.format("%Y-%m-%d %H:%M:%S").to_string();
+    let end_str = end.format("%Y-%m-%d %H:%M:%S").to_string();
+    
+    transactions
+        .inner_join(accounts::table.on(user_account_id.eq(accounts::id)))
+        .filter(accounts::user_id.eq(owner_id))
+        .filter(date.ge(start_str))
+        .filter(date.lt(end_str))
+        .group_by(category)
+        .select((category, sum(amount_cents)))
+        .load::<(String, Option<i64>)>(conn)
+        .map(|results| {
+            results
+                .into_iter()
+                .map(|(cat, amt)| (cat, amt.unwrap_or(0)))
+                .collect()
+        })
+}
+
+// Get all transactions for a user (across all their accounts)
+pub fn get_user_transactions(conn: &mut SqliteConnection, owner_id: i32) -> Result<Vec<Transaction>, Error> {
+    use crate::schema::transactions::dsl::*;
+    use crate::schema::accounts;
+    
+    transactions
+        .inner_join(accounts::table.on(user_account_id.eq(accounts::id)))
+        .filter(accounts::user_id.eq(owner_id))
+        .order(date.desc())
+        .select((id, user_account_id, contact_id, amount, category, date, amount_cents, balance_after))
+        .load::<Transaction>(conn)
+}
+
+// Get all unique categories used by a user (from both budgets and transactions)
+pub fn get_user_categories(conn: &mut SqliteConnection, owner_id: i32) -> Result<Vec<String>, Error> {
+    use crate::schema::transactions::dsl::*;
+    use crate::schema::accounts;
+    use crate::schema::budgets;
+    
+    // Get categories from transactions
+    let tx_categories: Vec<String> = transactions
+        .inner_join(accounts::table.on(user_account_id.eq(accounts::id)))
+        .filter(accounts::user_id.eq(owner_id))
+        .select(category)
+        .distinct()
+        .load::<String>(conn)?;
+    
+    // Get categories from budgets
+    let budget_categories: Vec<String> = budgets::table
+        .filter(budgets::user_id.eq(owner_id))
+        .filter(budgets::active.eq(true))
+        .select(budgets::category)
+        .distinct()
+        .load::<String>(conn)?;
+    
+    // Merge and deduplicate
+    let mut all_categories: Vec<String> = tx_categories.into_iter()
+        .chain(budget_categories.into_iter())
+        .collect();
+    all_categories.sort();
+    all_categories.dedup();
+    
+    Ok(all_categories)
+}
+
+// Update a transaction
+pub fn update_transaction(
+    conn: &mut SqliteConnection,
+    transaction_id: i32,
+    new_user_account: i32,
+    new_amount: f32,
+    new_category: String,
+    new_date: String,
+) -> Result<usize, Error> {
+    use crate::schema::transactions::dsl::*;
+    use crate::schema::accounts;
+    
+    // Save old transaction to revert its balance impact
+    let old_tx: Transaction = transactions.filter(id.eq(transaction_id)).first(conn)?;
+    
+    let cents = (new_amount * 100.0) as i32;
+    
+    // Revert old transaction's balance impact
+    update_account_balance(conn, old_tx.user_account_id, -old_tx.amount)?;
+    
+    // Apply new transaction's balance impact
+    update_account_balance(conn, new_user_account, new_amount)?;
+    
+    // Get the new balance after update
+    let current_account: Account = accounts::table.filter(accounts::id.eq(new_user_account)).first(conn)?;
+    let new_balance_after = current_account.balance;
+    
+    let result = diesel::update(transactions.filter(id.eq(transaction_id)))
+        .set((
+            user_account_id.eq(new_user_account),
+            amount.eq(new_amount),
+            category.eq(&new_category),
+            date.eq(&new_date),
+            amount_cents.eq(cents),
+            balance_after.eq(new_balance_after),
+        ))
+        .execute(conn)?;
+    
+    Ok(result)
+}
+
+// Delete a transaction
+pub fn delete_transaction(conn: &mut SqliteConnection, transaction_id: i32) -> Result<usize, Error> {
+    use crate::schema::transactions::dsl::*;
+    
+    // Save old transaction to revert its balance impact
+    let old_tx: Transaction = transactions.filter(id.eq(transaction_id)).first(conn)?;
+    
+    let result = diesel::delete(transactions.filter(id.eq(transaction_id)))
+        .execute(conn)?;
+    
+    // Revert the transaction's balance impact
+    update_account_balance(conn, old_tx.user_account_id, -old_tx.amount)?;
+    
+    Ok(result)
+}
+
+// Helper function to update account balance
+fn update_account_balance(
+    conn: &mut SqliteConnection,
+    account_id: i32,
+    amount_change: f32,
+) -> Result<usize, Error> {
+    use crate::schema::accounts::dsl::*;
+    
+    // Get current balance
+    let current_account: Account = accounts.filter(id.eq(account_id)).first(conn)?;
+    let new_balance = current_account.balance + amount_change;
+    
+    diesel::update(accounts.filter(id.eq(account_id)))
+        .set(balance.eq(new_balance))
+        .execute(conn)
+}
