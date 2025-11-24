@@ -71,6 +71,7 @@ pub struct FinancerApp {
     tx_editor_is_expense: bool,
     // Transaction filter
     tx_filter_account_id: Option<i32>,
+    tx_filter_category: Option<String>,
 }
 
 impl FinancerApp {
@@ -117,6 +118,7 @@ impl FinancerApp {
             tx_editor_is_expense: true,
             // Transaction filter initialization
             tx_filter_account_id: None,
+            tx_filter_category: None,
         }
     }
 
@@ -848,7 +850,9 @@ impl FinancerApp {
             // Filter section
             ui.horizontal(|ui| {
                 ui.heading("Transaction History");
-                ui.separator();
+            });
+            
+            ui.horizontal(|ui| {
                 ui.label("Filter by Account:");
                 egui::ComboBox::from_id_source("tx_filter_account")
                     .selected_text(
@@ -869,6 +873,25 @@ impl FinancerApp {
                             ui.selectable_value(&mut self.tx_filter_account_id, Some(account.id), &account.name);
                         }
                     });
+                
+                ui.separator();
+                ui.label("Filter by Category:");
+                let all_categories = self.get_all_categories();
+                egui::ComboBox::from_id_source("tx_filter_category")
+                    .selected_text(
+                        if let Some(ref filter_cat) = self.tx_filter_category {
+                            filter_cat.as_str()
+                        } else {
+                            "All Categories"
+                        }
+                    )
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.tx_filter_category, None, "All Categories");
+                        ui.separator();
+                        for cat in &all_categories {
+                            ui.selectable_value(&mut self.tx_filter_category, Some(cat.clone()), cat);
+                        }
+                    });
             });
 
             // Transaction list with filtering
@@ -879,11 +902,19 @@ impl FinancerApp {
                 let filtered_transactions: Vec<&Transaction> = self.transactions_list
                     .iter()
                     .filter(|tx| {
-                        if let Some(filter_id) = self.tx_filter_account_id {
+                        let account_match = if let Some(filter_id) = self.tx_filter_account_id {
                             tx.user_account_id == filter_id
                         } else {
                             true
-                        }
+                        };
+                        
+                        let category_match = if let Some(ref filter_cat) = self.tx_filter_category {
+                            &tx.category == filter_cat
+                        } else {
+                            true
+                        };
+                        
+                        account_match && category_match
                     })
                     .collect();
 
