@@ -2,12 +2,33 @@ use eframe::egui;
 use crate::db;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::{Error, DatabaseErrorKind};
-use crate::models::Account;
+use crate::models::{Account, Transaction};
+
+use crate::models::{Budget, Period};
+
+const DEFAULT_CATEGORIES: &[&str] = &[
+    "Food & Dining",
+    "Groceries",
+    "Transportation",
+    "Shopping",
+    "Entertainment",
+    "Bills & Utilities",
+    "Rent/Mortgage",
+    "Healthcare",
+    "Income",
+    "Transfer",
+    "Other",
+];
+use chrono::NaiveDateTime;
+use std::collections::HashMap;
 
 pub enum AppState {
     Login,
     Register,
     Dashboard,
+    Budgeting,
+    Transactions,
+    Transfers,
 }
 
 pub struct FinancerApp {
@@ -22,6 +43,42 @@ pub struct FinancerApp {
     new_account_name: String,
     new_account_type: String,   
     new_account_balance: f32,
+    budgets: Vec<Budget>,
+    selected_budget_period: Period,
+    budget_progress: HashMap<i32, (i64, i32)>,
+    editor_category: String,
+    editor_limit_cents: i32,
+    editor_period: Period,
+    editor_target_is_expense: bool,
+    current_editing: Option<i32>,
+    period_offset: i32,
+    editor_open: bool,
+    // Transaction fields
+    transactions_list: Vec<Transaction>,
+    tx_account_id: i32,
+    tx_amount: f32,
+    tx_category: String,
+    tx_custom_category: String,
+    tx_date: String,
+    tx_is_expense: bool,
+    user_categories: Vec<String>,
+    show_category_input: bool,
+    // Transaction editor fields
+    tx_editing_id: Option<i32>,
+    tx_editor_open: bool,
+    tx_editor_account_id: i32,
+    tx_editor_amount: f32,
+    tx_editor_category: String,
+    tx_editor_date: String,
+    tx_editor_is_expense: bool,
+    // Transaction filter
+    tx_filter_account_id: Option<i32>,
+    tx_filter_category: Option<String>,
+    // Transfer fields
+    transfer_from_account_id: i32,
+    transfer_to_account_id: i32,
+    transfer_amount: f32,
+    transfer_date: String,
 }
 
 impl FinancerApp {
@@ -38,7 +95,75 @@ impl FinancerApp {
             new_account_name: String::new(),
             new_account_type: String::new(),
             new_account_balance: 0.0,
+            budgets: Vec::new(),
+            selected_budget_period: Period::Monthly,
+            budget_progress: HashMap::new(),
+            editor_category: String::new(),
+            editor_limit_cents: 0,
+            editor_period: Period::Monthly,
+            editor_target_is_expense: true,
+            current_editing: None,
+            period_offset: 0,
+            editor_open: false,
+            // Transaction initialization
+            transactions_list: Vec::new(),
+            tx_account_id: 0,
+            tx_amount: 0.0,
+            tx_category: DEFAULT_CATEGORIES[0].to_string(),
+            tx_custom_category: String::new(),
+            tx_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            tx_is_expense: true,
+            user_categories: Vec::new(),
+            show_category_input: false,
+            // Transaction editor initialization
+            tx_editing_id: None,
+            tx_editor_open: false,
+            tx_editor_account_id: 0,
+            tx_editor_amount: 0.0,
+            tx_editor_category: DEFAULT_CATEGORIES[0].to_string(),
+            tx_editor_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            tx_editor_is_expense: true,
+            // Transaction filter initialization
+            tx_filter_account_id: None,
+            tx_filter_category: None,
+            // Transfer initialization
+            transfer_from_account_id: 0,
+            transfer_to_account_id: 0,
+            transfer_amount: 0.0,
+            transfer_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
         }
+    }
+
+    // Transaction helpers
+    fn load_user_transactions(&mut self) {
+        if let Some(uid) = self.user_id {
+            self.transactions_list = db::get_user_transactions(&mut self.conn, uid).unwrap_or_default();
+        } else {
+            self.transactions_list.clear();
+        }
+    }
+
+    fn load_user_categories(&mut self) {
+        if let Some(uid) = self.user_id {
+            self.user_categories = db::get_user_categories(&mut self.conn, uid).unwrap_or_default();
+            // Limit to 50 categories
+            if self.user_categories.len() > 50 {
+                self.user_categories.truncate(50);
+            }
+        } else {
+            self.user_categories.clear();
+        }
+    }
+
+    fn get_all_categories(&self) -> Vec<String> {
+        let mut all = DEFAULT_CATEGORIES.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        all.extend(self.user_categories.iter().cloned());
+        all.sort();
+        all.dedup();
+        if all.len() > 50 {
+            all.truncate(50);
+        }
+        all
     }
 
     fn show_login(&mut self, ctx: &egui::Context) {
@@ -196,8 +321,974 @@ impl FinancerApp {
                 self.accounts_list.clear();
                 self.message.clear();
             }
+
+            if ui.button("Budgets").clicked() {
+                self.screen = AppState::Budgeting;
+                self.load_user_budgets();
+                self.load_user_categories();
+                self.compute_budget_progress(0);
+            }
+
+            if ui.button("Transactions").clicked() {
+                self.screen = AppState::Transactions;
+                self.load_user_transactions();
+                self.load_user_categories();
+            }
+
+            if ui.button("Transfers").clicked() {
+                self.screen = AppState::Transfers;
+                self.load_user_transactions();
+            }
         });
     }
+
+    // load budgets for current user
+    fn load_user_budgets(&mut self) {
+        if let Some(uid) = self.user_id {
+            match db::get_user_budgets(&mut self.conn, uid) {
+                Ok(bs) => self.budgets = bs,
+                Err(_) => self.budgets.clear(),
+            }
+        } else {
+            self.budgets.clear();
+        }
+    }
+
+
+    fn get_period_range(period: Period, offset: i32) -> (NaiveDateTime, NaiveDateTime) {
+        // minimal example — uses chrono and assumes Local::today -> convert to NaiveDateTime at midnight.
+        // Replace with your preferred week-start logic.
+        use chrono::{Datelike, Duration, Local, NaiveDate};
+        let today = Local::now().date_naive();
+        match period {
+            Period::Daily => {
+                let day = today + Duration::days(offset as i64);
+                let start = day.and_hms_opt(0, 0, 0).unwrap();
+                let end = (day + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap();
+                (start, end)
+            }
+            Period::Weekly => {
+                // start at Monday of the current week
+                let weekday = today.weekday().num_days_from_monday() as i64;
+                let week_start = today - Duration::days(weekday) + Duration::weeks(offset as i64);
+                let start = week_start.and_hms_opt(0, 0, 0).unwrap();
+                let end = (week_start + Duration::weeks(1)).and_hms_opt(0, 0, 0).unwrap();
+                (start, end)
+            }
+            Period::Monthly => {
+                let mut year = today.year();
+                let mut month = today.month() as i32;
+                // shift months by offset
+                let total_month = month - 1 + offset;
+                year += total_month.div_euclid(12);
+                month = (total_month.rem_euclid(12) + 1) as u32 as i32;
+                let start_date = NaiveDate::from_ymd_opt(year, month as u32, 1).unwrap();
+                let next_month = if month == 12 {
+                    NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap()
+                } else {
+                    NaiveDate::from_ymd_opt(year, (month + 1) as u32, 1).unwrap()
+                };
+                (start_date.and_hms_opt(0, 0, 0).unwrap(), next_month.and_hms_opt(0, 0, 0).unwrap())
+            }
+            Period::Yearly => {
+                let year = today.year() + offset;
+                let start = NaiveDate::from_ymd_opt(year, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+                let end = NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+                (start, end)
+            }
+        }
+    }
+
+    // compute progress for all loaded budgets and store into self.budget_progress
+    fn compute_budget_progress(&mut self, offset: i32) {
+        self.budget_progress.clear();
+        if let Some(uid) = self.user_id {
+            for b in &self.budgets {
+                // Use each budget's own period, not the view filter period
+                let budget_period = Period::from_str(&b.period);
+                let (start, end) = Self::get_period_range(budget_period, offset);
+                // assumes db::get_spend_for_category_period returns sum in cents (i64)
+                match db::get_spend_for_category_period(&mut self.conn, uid, &b.category, start, end) {
+                    Ok(spent_cents) => {
+                        self.budget_progress.insert(b.id.unwrap_or(0), (spent_cents, b.limit_cents));
+                    }
+                    Err(_) => {
+                        self.budget_progress.insert(b.id.unwrap_or(0), (0, b.limit_cents));
+                    }
+                }
+            }
+        }
+    }
+
+    fn show_budgets(&mut self, ctx: &egui::Context) {
+    use egui::Color32;
+    egui::CentralPanel::default().show(ctx, |ui| {
+        ui.heading("Budgets");
+
+        ui.horizontal(|ui| {
+            if ui.button("Back").clicked() {
+                self.screen = AppState::Dashboard;
+            }
+
+            ui.separator();
+
+            // Time navigation controls
+            if ui.button("Prev").clicked() {
+                self.period_offset -= 1;
+                self.compute_budget_progress(self.period_offset);
+            }
+            
+            // Show current viewing status
+            let offset_text = match self.period_offset {
+                0 => "Current Period".to_string(),
+                1 => "1 period ahead".to_string(),
+                -1 => "1 period ago".to_string(),
+                n if n > 0 => format!("{} periods ahead", n),
+                n => format!("{} periods ago", n.abs()),
+            };
+            ui.label(egui::RichText::new(&offset_text).strong());
+            
+            if ui.button("Next").clicked() {
+                self.period_offset += 1;
+                self.compute_budget_progress(self.period_offset);
+            }
+            
+            if self.period_offset != 0 {
+                if ui.button("Reset to Current").clicked() {
+                    self.period_offset = 0;
+                    self.compute_budget_progress(self.period_offset);
+                }
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Create Budget").clicked() {
+                    // open editor in create mode
+                    self.current_editing = None;
+                    self.editor_category.clear();
+                    self.editor_limit_cents = 0;
+                    self.editor_period = Period::Monthly;
+                    self.editor_target_is_expense = true;
+                    self.editor_open = true;
+                }
+            });
+        });
+
+        ui.separator();
+
+        // show list
+        if self.budgets.is_empty() {
+            ui.label("No budgets. Create one with the Create Budget button.");
+        } else {
+            for b in &self.budgets {
+                let (raw_spent, limit) = self
+                    .budget_progress
+                    .get(&b.id.unwrap_or(0))
+                    .cloned()
+                    .unwrap_or((0, b.limit_cents));
+
+                // Calculate date range for this budget to display
+                let budget_period = crate::models::Period::from_str(&b.period);
+                let (start_date, end_date) = Self::get_period_range(budget_period, self.period_offset);
+                let date_range_str = format!(
+                    "{} - {}",
+                    start_date.format("%b %d, %Y"),
+                    end_date.format("%b %d, %Y")
+                );
+
+                // Interpret spent based on target type
+                let target_type = crate::models::TargetType::from_str(&b.target_type);
+
+                let spent_for_bar: f32 = match target_type {
+                    crate::models::TargetType::Expense => {
+                        // expenses are stored as negative -> use absolute value
+                        (raw_spent.abs()) as f32
+                    }
+                    crate::models::TargetType::Income => {
+                        // income is positive; if somehow negative, treat as 0
+                        raw_spent.max(0) as f32
+                    }
+                };
+
+                let limit_f = limit.max(0) as f32;
+                let ratio = if limit_f > 0.0 {
+                    spent_for_bar / limit_f
+                } else {
+                    0.0
+                };
+
+                let progress = ratio.clamp(0.0, 5.0);
+
+                let color = if ratio < 0.8 {
+                    Color32::from_rgb(100, 200, 100)
+                } else if ratio <= 1.0 {
+                    Color32::from_rgb(250, 200, 50)
+                } else {
+                    Color32::from_rgb(220, 50, 50)
+                };
+
+                ui.horizontal(|ui| {
+                    ui.label(format!("{} ({:?})", b.category, b.period));
+                    
+                    if ui.button("Edit").clicked() {
+                        self.current_editing = b.id;
+                        self.editor_category = b.category.clone();
+                        self.editor_limit_cents = b.limit_cents;
+                        self.editor_period = crate::models::Period::from_str(&b.period);
+                        self.editor_target_is_expense = crate::models::TargetType::from_str(&b.target_type) == crate::models::TargetType::Expense;
+                        self.editor_open = true;
+                    }
+                });
+                
+                ui.label(egui::RichText::new(&date_range_str).small().italics());
+                
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        [200.0, 20.0],
+                        egui::ProgressBar::new(progress).fill(color).show_percentage()
+                    );
+                    ui.label(format!(
+                        "spent ${:.2} / ${:.2}",
+                        spent_for_bar / 100.0,
+                        limit_f / 100.0
+                    ));
+                });
+                ui.separator();
+            }
+        }
+
+        ui.separator();
+        ui.heading("Quick Create Budget");
+        
+        // Category dropdown with custom option
+        ui.horizontal(|ui| {
+            ui.label("Category:");
+            let all_categories = self.get_all_categories();
+            
+            egui::ComboBox::from_id_source("budget_category")
+                .selected_text(&self.editor_category)
+                .show_ui(ui, |ui| {
+                    for cat in &all_categories {
+                        ui.selectable_value(&mut self.editor_category, cat.clone(), cat);
+                    }
+                    ui.separator();
+                    if ui.selectable_label(self.show_category_input, "+ Add New Category").clicked() {
+                        self.show_category_input = true;
+                    }
+                });
+        });
+
+        // Custom category input
+        if self.show_category_input {
+            ui.horizontal(|ui| {
+                ui.label("New Category:");
+                ui.text_edit_singleline(&mut self.tx_custom_category);
+                if ui.button("Add").clicked() {
+                    if !self.tx_custom_category.is_empty() && self.user_categories.len() < 50 {
+                        self.editor_category = self.tx_custom_category.clone();
+                        self.tx_custom_category.clear();
+                        self.show_category_input = false;
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    self.tx_custom_category.clear();
+                    self.show_category_input = false;
+                }
+            });
+        }
+        
+        ui.horizontal(|ui| {
+            ui.label("Limit ($):");
+            let limit_dollars = self.editor_limit_cents as f32 / 100.0;
+            let mut temp_limit = limit_dollars;
+            if ui.add(egui::DragValue::new(&mut temp_limit).speed(1.0).prefix("$")).changed() {
+                self.editor_limit_cents = (temp_limit * 100.0) as i32;
+            }
+            if ui.button("Create").clicked() {
+                if let Some(uid) = self.user_id {
+                    let nb = crate::models::NewBudget {
+                        user_id: uid,
+                        category: self.editor_category.clone(),
+                        limit_cents: self.editor_limit_cents,
+                        period: self.editor_period.to_str().to_string(),
+                        target_type: if self.editor_target_is_expense {
+                            crate::models::TargetType::Expense.to_str().to_string()
+                        } else {
+                            crate::models::TargetType::Income.to_str().to_string()
+                        },
+                    };
+                    if let Ok(_) = db::create_budget(&mut self.conn, nb) {
+                        self.load_user_budgets();
+                        self.compute_budget_progress(self.period_offset);
+                        self.editor_category.clear();
+                        self.editor_limit_cents = 0;
+                    } else {
+                        self.message = "Failed to create budget.".to_string();
+                    }
+                }
+            }
+        });
+    });
+
+    // Render editor window if requested
+    if self.editor_open {
+        // current_editing == Some(id) -> editing that id; None -> create
+        self.show_budget_editor(ctx, self.current_editing);
+    }
+}
+
+    fn show_budget_editor(&mut self, ctx: &egui::Context, editing: Option<i32>) {
+        // populate editor fields from selected budget (only if fields look "empty" to avoid overwriting while typing)
+        if let Some(id) = editing {
+            if let Some(b) = self.budgets.iter().find(|b| b.id.unwrap_or(-1) == id) {
+                if self.editor_category.is_empty() {
+                    self.editor_category = b.category.clone();
+                }
+                if self.editor_limit_cents == 0 {
+                    self.editor_limit_cents = b.limit_cents;
+                }
+                self.editor_period = crate::models::Period::from_str(&b.period);
+                self.editor_target_is_expense = crate::models::TargetType::from_str(&b.target_type) == crate::models::TargetType::Expense;
+            }
+        }
+
+        egui::Window::new("Budget Editor").resizable(false).show(ctx, |ui| {
+            // Category dropdown with custom option
+            ui.horizontal(|ui| {
+                ui.label("Category:");
+                let all_categories = self.get_all_categories();
+                
+                egui::ComboBox::from_id_source("budget_editor_category")
+                    .selected_text(&self.editor_category)
+                    .show_ui(ui, |ui| {
+                        for cat in &all_categories {
+                            ui.selectable_value(&mut self.editor_category, cat.clone(), cat);
+                        }
+                        ui.separator();
+                        if ui.selectable_label(self.show_category_input, "+ Add New Category").clicked() {
+                            self.show_category_input = true;
+                        }
+                    });
+            });
+
+            // Custom category input
+            if self.show_category_input {
+                ui.horizontal(|ui| {
+                    ui.label("New Category:");
+                    ui.text_edit_singleline(&mut self.tx_custom_category);
+                    if ui.button("Add").clicked() {
+                        if !self.tx_custom_category.is_empty() && self.user_categories.len() < 50 {
+                            self.editor_category = self.tx_custom_category.clone();
+                            self.tx_custom_category.clear();
+                            self.show_category_input = false;
+                        }
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.tx_custom_category.clear();
+                        self.show_category_input = false;
+                    }
+                });
+            }
+
+            // Limit in dollars
+            ui.horizontal(|ui| {
+                ui.label("Limit ($):");
+                let mut limit_dollars = self.editor_limit_cents as f32 / 100.0;
+                if ui.add(egui::DragValue::new(&mut limit_dollars).speed(1.0).prefix("$")).changed() {
+                    self.editor_limit_cents = (limit_dollars * 100.0) as i32;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Period:");
+                ui.radio_value(&mut self.editor_period, Period::Daily, "Daily");
+                ui.radio_value(&mut self.editor_period, Period::Weekly, "Weekly");
+                ui.radio_value(&mut self.editor_period, Period::Monthly, "Monthly");
+                ui.radio_value(&mut self.editor_period, Period::Yearly, "Yearly");
+            });
+
+            ui.checkbox(&mut self.editor_target_is_expense, "Expense budget");
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                if ui.button("Save").clicked() {
+                    if let Some(uid) = self.user_id {
+                let nb = crate::models::NewBudget {
+                    user_id: uid,
+                    category: self.editor_category.clone(),
+                    limit_cents: self.editor_limit_cents,
+                    period: self.editor_period.to_str().to_string(),
+                    target_type: if self.editor_target_is_expense {
+                        crate::models::TargetType::Expense.to_str().to_string()
+                    } else {
+                        crate::models::TargetType::Income.to_str().to_string()
+                    },
+                };                        let res = match editing {
+                            Some(id) => db::update_budget(&mut self.conn, id, nb).map(|_| ()),
+                            None => db::create_budget(&mut self.conn, nb).map(|_| ()),
+                        };
+
+                        if res.is_ok() {
+                            self.load_user_budgets();
+                            self.compute_budget_progress(0);
+                            // clear quick-editor
+                            self.editor_category.clear();
+                            self.editor_limit_cents = 0;
+                            self.editor_open = false; // add this
+                            self.current_editing = None; // add this
+                        } else {
+                            self.message = format!("Failed to save budget: {:?}", res.err());
+                        }
+                    } else {
+                        self.message = "Not logged in.".to_string();
+                    }
+                }
+
+                if editing.is_some() {
+                    if ui.button("Delete").clicked() {
+                        if let Some(id) = editing {
+                            if db::delete_budget(&mut self.conn, id).is_ok() {
+                                self.load_user_budgets();
+                                self.compute_budget_progress(0);
+                            } else {
+                                self.message = "Failed to delete budget.".to_string();
+                            }
+                        }
+                    }
+                }
+
+                if ui.button("Close").clicked() {
+                    self.editor_open = false;
+                    self.current_editing = None;
+                }
+            });
+        });
+    }
+
+    fn show_transactions(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Transactions");
+
+            ui.horizontal(|ui| {
+                if ui.button("Back to Dashboard").clicked() {
+                    self.screen = AppState::Dashboard;
+                }
+            });
+
+            ui.separator();
+            ui.heading("Add New Transaction");
+
+            // Account selector
+            ui.horizontal(|ui| {
+                ui.label("Account:");
+                egui::ComboBox::from_id_source("tx_account_selector")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.tx_account_id)
+                            .map(|a| a.name.as_str())
+                            .unwrap_or("Select Account")
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            ui.selectable_value(&mut self.tx_account_id, account.id, &account.name);
+                        }
+                    });
+            });
+
+            // Amount and type
+            ui.horizontal(|ui| {
+                ui.label("Amount:");
+                ui.add(egui::DragValue::new(&mut self.tx_amount).speed(1.0).prefix("$"));
+                ui.checkbox(&mut self.tx_is_expense, "Expense");
+            });
+
+            // Category selector
+            ui.horizontal(|ui| {
+                ui.label("Category:");
+                let all_categories = self.get_all_categories();
+                
+                egui::ComboBox::from_id_source("tx_category_selector")
+                    .selected_text(&self.tx_category)
+                    .show_ui(ui, |ui| {
+                        for cat in &all_categories {
+                            ui.selectable_value(&mut self.tx_category, cat.clone(), cat);
+                        }
+                        ui.separator();
+                        if ui.selectable_label(self.show_category_input, "+ Add New Category").clicked() {
+                            self.show_category_input = true;
+                        }
+                    });
+            });
+
+            // Custom category input
+            if self.show_category_input {
+                ui.horizontal(|ui| {
+                    ui.label("New Category:");
+                    ui.text_edit_singleline(&mut self.tx_custom_category);
+                    if ui.button("Add").clicked() {
+                        if !self.tx_custom_category.is_empty() && self.user_categories.len() < 50 {
+                            self.tx_category = self.tx_custom_category.clone();
+                            self.tx_custom_category.clear();
+                            self.show_category_input = false;
+                        }
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.tx_custom_category.clear();
+                        self.show_category_input = false;
+                    }
+                });
+            }
+
+            // Date
+            ui.horizontal(|ui| {
+                ui.label("Date:");
+                ui.text_edit_singleline(&mut self.tx_date);
+                ui.label("(YYYY-MM-DD)");
+            });
+
+            // Submit button
+            if ui.button("Add Transaction").clicked() {
+                if let Some(_uid) = self.user_id {
+                    if self.tx_account_id > 0 && self.tx_amount != 0.0 {
+                        let amount = if self.tx_is_expense { -self.tx_amount.abs() } else { self.tx_amount.abs() };
+                        let date_time = format!("{} 00:00:00", self.tx_date);
+                        
+                        match db::create_transaction(
+                            &mut self.conn,
+                            self.tx_account_id,
+                            0, // contact_id - not used
+                            amount,
+                            self.tx_category.clone(),
+                            date_time,
+                        ) {
+                            Ok(_) => {
+                                self.message = "Transaction added successfully!".to_string();
+                                self.load_user_transactions();
+                                self.load_user_categories();
+                                self.load_user_budgets();
+                                self.compute_budget_progress(self.period_offset);
+                                // Reload accounts to show updated balance
+                                if let Some(uid) = self.user_id {
+                                    self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                                }
+                                // Reset form
+                                self.tx_amount = 0.0;
+                                self.tx_is_expense = true;
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to add transaction: {:?}", e);
+                            }
+                        }
+                    } else {
+                        self.message = "Please select an account and enter an amount.".to_string();
+                    }
+                }
+            }
+
+            ui.separator();
+            ui.label(&self.message);
+
+            ui.separator();
+            
+            // Filter section
+            ui.horizontal(|ui| {
+                ui.heading("Transaction History");
+            });
+            
+            ui.horizontal(|ui| {
+                ui.label("Filter by Account:");
+                egui::ComboBox::from_id_source("tx_filter_account")
+                    .selected_text(
+                        if let Some(filter_id) = self.tx_filter_account_id {
+                            self.accounts_list
+                                .iter()
+                                .find(|a| a.id == filter_id)
+                                .map(|a| a.name.as_str())
+                                .unwrap_or("All Accounts")
+                        } else {
+                            "All Accounts"
+                        }
+                    )
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.tx_filter_account_id, None, "All Accounts");
+                        ui.separator();
+                        for account in &self.accounts_list {
+                            ui.selectable_value(&mut self.tx_filter_account_id, Some(account.id), &account.name);
+                        }
+                    });
+                
+                ui.separator();
+                ui.label("Filter by Category:");
+                let all_categories = self.get_all_categories();
+                egui::ComboBox::from_id_source("tx_filter_category")
+                    .selected_text(
+                        if let Some(ref filter_cat) = self.tx_filter_category {
+                            filter_cat.as_str()
+                        } else {
+                            "All Categories"
+                        }
+                    )
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.tx_filter_category, None, "All Categories");
+                        ui.separator();
+                        for cat in &all_categories {
+                            ui.selectable_value(&mut self.tx_filter_category, Some(cat.clone()), cat);
+                        }
+                    });
+            });
+
+            // Transaction list with filtering
+            let mut tx_to_edit: Option<Transaction> = None;
+            let mut tx_to_delete: Option<i32> = None;
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let filtered_transactions: Vec<&Transaction> = self.transactions_list
+                    .iter()
+                    .filter(|tx| {
+                        let account_match = if let Some(filter_id) = self.tx_filter_account_id {
+                            tx.user_account_id == filter_id
+                        } else {
+                            true
+                        };
+                        
+                        let category_match = if let Some(ref filter_cat) = self.tx_filter_category {
+                            &tx.category == filter_cat
+                        } else {
+                            true
+                        };
+                        
+                        account_match && category_match
+                    })
+                    .collect();
+
+                if filtered_transactions.is_empty() {
+                    ui.label("No transactions match the filter.");
+                } else {
+                    for tx in filtered_transactions {
+                        let account_name = self.accounts_list
+                            .iter()
+                            .find(|a| a.id == tx.user_account_id)
+                            .map(|a| a.name.as_str())
+                            .unwrap_or("Unknown");
+                        
+                        let color = if tx.amount >= 0.0 {
+                            egui::Color32::from_rgb(50, 200, 50)
+                        } else {
+                            egui::Color32::from_rgb(200, 50, 50)
+                        };
+
+                        ui.horizontal(|ui| {
+                            ui.colored_label(color, format!("${:.2}", tx.amount));
+                            ui.label(format!("| {} | {} | {}", tx.category, account_name, tx.date));
+                            ui.label(format!("| Balance: ${:.2}", tx.balance_after));
+                            
+                            if ui.button("Edit").clicked() {
+                                tx_to_edit = Some(tx.clone());
+                            }
+                            
+                            if ui.button("Delete").clicked() {
+                                tx_to_delete = Some(tx.id);
+                            }
+                        });
+                        ui.separator();
+                    }
+                }
+            });
+
+            // Handle edit action
+            if let Some(tx) = tx_to_edit {
+                self.tx_editing_id = Some(tx.id);
+                self.tx_editor_open = true;
+                self.tx_editor_account_id = tx.user_account_id;
+                self.tx_editor_amount = tx.amount.abs();
+                self.tx_editor_category = tx.category.clone();
+                self.tx_editor_date = tx.date.clone();
+                self.tx_editor_is_expense = tx.amount < 0.0;
+            }
+
+            // Handle delete action
+            if let Some(tx_id) = tx_to_delete {
+                if let Err(e) = db::delete_transaction(&mut self.conn, tx_id) {
+                    self.message = format!("Error deleting transaction: {}", e);
+                } else {
+                    self.load_user_transactions();
+                    self.load_user_budgets();
+                    self.compute_budget_progress(self.period_offset);
+
+                    // Reload accounts to show updated balance
+                    if let Some(uid) = self.user_id {
+                        self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                    }
+                    self.message = "Transaction deleted successfully".to_string();
+                }
+            }
+        });
+        
+        // Render transaction editor if open
+        if self.tx_editor_open {
+            self.show_transaction_editor(ctx);
+        }
+    }
+
+    fn show_transaction_editor(&mut self, ctx: &egui::Context) {
+        let mut should_close = false;
+
+        egui::Window::new("Edit Transaction")
+            .collapsible(false)
+            .show(ctx, |ui| {
+                // Account selector
+                ui.horizontal(|ui| {
+                    ui.label("Account:");
+                    egui::ComboBox::from_id_source("tx_editor_account_selector")
+                        .selected_text(
+                            self.accounts_list
+                                .iter()
+                                .find(|a| a.id == self.tx_editor_account_id)
+                                .map(|a| a.name.as_str())
+                                .unwrap_or("Select Account")
+                        )
+                        .show_ui(ui, |ui| {
+                            for acc in &self.accounts_list {
+                                ui.selectable_value(&mut self.tx_editor_account_id, acc.id, &acc.name);
+                            }
+                        });
+                });
+
+                // Category selector
+                ui.horizontal(|ui| {
+                    ui.label("Category:");
+                    let all_categories = self.get_all_categories();
+                    egui::ComboBox::from_id_source("tx_editor_category_selector")
+                        .selected_text(&self.tx_editor_category)
+                        .show_ui(ui, |ui| {
+                            for cat in &all_categories {
+                                ui.selectable_value(&mut self.tx_editor_category, cat.clone(), cat);
+                            }
+                        });
+                });
+
+                // Amount
+                ui.horizontal(|ui| {
+                    ui.label("Amount:");
+                    ui.add(egui::DragValue::new(&mut self.tx_editor_amount).speed(0.1));
+                    ui.checkbox(&mut self.tx_editor_is_expense, "Expense");
+                });
+
+                // Date
+                ui.horizontal(|ui| {
+                    ui.label("Date:");
+                    ui.text_edit_singleline(&mut self.tx_editor_date);
+                });
+
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        if let Some(tx_id) = self.tx_editing_id {
+                            let amount = if self.tx_editor_is_expense {
+                                -self.tx_editor_amount
+                            } else {
+                                self.tx_editor_amount
+                            };
+
+                            match db::update_transaction(
+                                &mut self.conn,
+                                tx_id,
+                                self.tx_editor_account_id,
+                                amount,
+                                self.tx_editor_category.clone(),
+                                self.tx_editor_date.clone(),
+                            ) {
+                                Ok(_) => {
+                                    self.message = "Transaction updated successfully".to_string();
+                                    self.load_user_transactions();
+                                    self.load_user_budgets();
+                                    self.compute_budget_progress(self.period_offset);
+                                    
+                                    // Reload accounts to show updated balance
+                                    if let Some(uid) = self.user_id {
+                                        self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                                    }
+                                    should_close = true;
+                                }
+                                Err(e) => {
+                                    self.message = format!("Error updating transaction: {}", e);
+                                }
+                            }
+                        }
+                    }
+
+                    if ui.button("Cancel").clicked() {
+                        should_close = true;
+                    }
+                });
+            });
+
+        if should_close {
+            self.tx_editor_open = false;
+            self.tx_editing_id = None;
+        }
+    }
+
+    fn show_transfers(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Account Transfers");
+
+            ui.horizontal(|ui| {
+                if ui.button("Back to Dashboard").clicked() {
+                    self.screen = AppState::Dashboard;
+                }
+            });
+
+            ui.separator();
+            ui.heading("Create Transfer");
+
+            // From Account selector
+            ui.horizontal(|ui| {
+                ui.label("From Account:");
+                egui::ComboBox::from_id_source("transfer_from_account")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.transfer_from_account_id)
+                            .map(|a| format!("{} (${:.2})", a.name, a.balance))
+                            .unwrap_or_else(|| "Select Account".to_string())
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            ui.selectable_value(
+                                &mut self.transfer_from_account_id,
+                                account.id,
+                                format!("{} (${:.2})", account.name, account.balance)
+                            );
+                        }
+                    });
+            });
+
+            // To Account selector
+            ui.horizontal(|ui| {
+                ui.label("To Account:");
+                egui::ComboBox::from_id_source("transfer_to_account")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.transfer_to_account_id)
+                            .map(|a| format!("{} (${:.2})", a.name, a.balance))
+                            .unwrap_or_else(|| "Select Account".to_string())
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            // Don't allow selecting the same account as source
+                            if account.id != self.transfer_from_account_id {
+                                ui.selectable_value(
+                                    &mut self.transfer_to_account_id,
+                                    account.id,
+                                    format!("{} (${:.2})", account.name, account.balance)
+                                );
+                            }
+                        }
+                    });
+            });
+
+            // Amount
+            ui.horizontal(|ui| {
+                ui.label("Amount:");
+                ui.add(egui::DragValue::new(&mut self.transfer_amount).speed(1.0).prefix("$"));
+            });
+
+            // Date
+            ui.horizontal(|ui| {
+                ui.label("Date:");
+                ui.text_edit_singleline(&mut self.transfer_date);
+                ui.label("(YYYY-MM-DD)");
+            });
+
+            // Transfer button
+            if ui.button("Execute Transfer").clicked() {
+                if self.transfer_from_account_id > 0 
+                    && self.transfer_to_account_id > 0 
+                    && self.transfer_from_account_id != self.transfer_to_account_id
+                    && self.transfer_amount > 0.0 {
+                    
+                    let date_time = format!("{} 00:00:00", self.transfer_date);
+                    
+                    match db::create_transfer(
+                        &mut self.conn,
+                        self.transfer_from_account_id,
+                        self.transfer_to_account_id,
+                        self.transfer_amount,
+                        date_time,
+                    ) {
+                        Ok(_) => {
+                            self.message = format!(
+                                "Transfer of ${:.2} completed successfully!",
+                                self.transfer_amount
+                            );
+                            self.load_user_transactions();
+                            self.load_user_budgets();
+                            self.compute_budget_progress(self.period_offset);
+                            
+                            // Reload accounts to show updated balances
+                            if let Some(uid) = self.user_id {
+                                self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                            }
+                            
+                            // Reset form
+                            self.transfer_amount = 0.0;
+                        }
+                        Err(e) => {
+                            self.message = format!("Transfer failed: {:?}", e);
+                        }
+                    }
+                } else if self.transfer_from_account_id == self.transfer_to_account_id {
+                    self.message = "Cannot transfer to the same account.".to_string();
+                } else {
+                    self.message = "Please select both accounts and enter a positive amount.".to_string();
+                }
+            }
+
+            ui.separator();
+            ui.label(&self.message);
+
+            ui.separator();
+            ui.heading("Transfer History");
+
+            // Show only Transfer transactions
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let transfer_transactions: Vec<&Transaction> = self.transactions_list
+                    .iter()
+                    .filter(|tx| tx.category == "Transfer")
+                    .collect();
+
+                if transfer_transactions.is_empty() {
+                    ui.label("No transfers yet.");
+                } else {
+                    for tx in transfer_transactions {
+                        let account_name = self.accounts_list
+                            .iter()
+                            .find(|a| a.id == tx.user_account_id)
+                            .map(|a| a.name.as_str())
+                            .unwrap_or("Unknown");
+                        
+                        let color = if tx.amount >= 0.0 {
+                            egui::Color32::from_rgb(50, 200, 50)
+                        } else {
+                            egui::Color32::from_rgb(200, 50, 50)
+                        };
+
+                        let transfer_type = if tx.amount >= 0.0 { "TO" } else { "FROM" };
+
+                        ui.horizontal(|ui| {
+                            ui.colored_label(color, format!("${:.2}", tx.amount.abs()));
+                            ui.label(format!("| {} {} | {} | Balance: ${:.2}", 
+                                transfer_type, account_name, tx.date, tx.balance_after));
+                        });
+                        ui.separator();
+                    }
+                }
+            });
+        });
+    }
+
 }
 
 impl eframe::App for FinancerApp {
@@ -206,6 +1297,9 @@ impl eframe::App for FinancerApp {
             AppState::Login => self.show_login(ctx),
             AppState::Register => self.show_register(ctx),
             AppState::Dashboard => self.show_dashboard(ctx),
+            AppState::Budgeting => self.show_budgets(ctx),
+            AppState::Transactions => self.show_transactions(ctx),
+            AppState::Transfers => self.show_transfers(ctx),
         }
     }
 }

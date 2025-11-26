@@ -2,6 +2,7 @@ use super::schema::users;
 use super::schema::accounts;
 use super::schema::contacts;
 use super::schema::transactions;
+use super::schema::budgets;
 use diesel::{Insertable, Queryable};
 
 #[derive(Debug)]
@@ -10,12 +11,16 @@ pub enum AccountType {
     Savings,
 }
 
-#[derive(Debug, Queryable)]
+#[derive(Debug, Clone, Queryable)]
 pub struct Transaction {
     pub id: i32,
     pub user_account_id: i32,
     pub contact_id: i32,
     pub amount: f32,
+    pub category: String,
+    pub date: String, 
+    pub amount_cents: i32, 
+    pub balance_after: f32, 
 }
 
 #[derive(Debug, Insertable)]
@@ -24,6 +29,10 @@ pub struct NewTransaction {
     pub user_account_id: i32,
     pub contact_id: i32,
     pub amount: f32,
+    pub category: String,
+    pub date: String,
+    pub amount_cents: i32, 
+    pub balance_after: f32, 
 }
 
 #[derive(Debug, Queryable)]
@@ -71,4 +80,80 @@ pub struct NewUser<'a> {
     pub username: &'a str,
     pub password_hash: &'a str,
     pub email: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Period {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+impl Period {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            Period::Daily => "Daily",
+            Period::Weekly => "Weekly",
+            Period::Monthly => "Monthly",
+            Period::Yearly => "Yearly",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "Daily" => Period::Daily,
+            "Weekly" => Period::Weekly,
+            "Monthly" => Period::Monthly,
+            "Yearly" => Period::Yearly,
+            _ => Period::Monthly, // default
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetType {
+    Expense, // spending limit
+    Income,  // income target
+}
+
+impl TargetType {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            TargetType::Expense => "Expense",
+            TargetType::Income => "Income",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "Expense" => TargetType::Expense,
+            "Income" => TargetType::Income,
+            _ => TargetType::Expense, // default
+        }
+    }
+}
+
+
+#[derive(Debug, Queryable, Clone)]
+pub struct Budget {
+    pub id: Option<i32>, 
+    pub user_id: i32,
+    pub category: String,
+    pub limit_cents: i32, 
+    pub period: String, 
+    pub target_type: String,
+    pub active: bool, 
+    pub updated_at: String, 
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = budgets)]
+pub struct NewBudget {
+    pub user_id: i32,
+    pub category: String,
+    pub limit_cents: i32,
+    pub period: String,
+    pub target_type: String,
 }
