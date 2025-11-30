@@ -850,38 +850,49 @@ impl FinancerApp {
             // Submit button
             if ui.button("Add Transaction").clicked() {
                 if let Some(_uid) = self.user_id {
-                    if self.tx_account_id > 0 && self.tx_amount != 0.0 {
-                        let amount = if self.tx_is_expense { -self.tx_amount.abs() } else { self.tx_amount.abs() };
-                        let date_time = format!("{} 00:00:00", self.tx_date);
-                        
-                        match db::create_transaction(
-                            &mut self.conn,
-                            self.tx_account_id,
-                            0, // contact_id - not used
-                            amount,
-                            self.tx_category.clone(),
-                            date_time,
-                        ) {
-                            Ok(_) => {
-                                self.message = "Transaction added successfully!".to_string();
-                                self.load_user_transactions();
-                                self.load_user_categories();
-                                self.load_user_budgets();
-                                self.compute_budget_progress(self.period_offset);
-                                // Reload accounts to show updated balance
-                                if let Some(uid) = self.user_id {
-                                    self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                    if self.tx_account_id > 0 && self.tx_amount > 0.0 {
+                        // Find the selected account
+                        let account_opt = self.accounts_list.iter().find(|a| a.id == self.tx_account_id);
+                        if let Some(account) = account_opt {
+                            let amount = if self.tx_is_expense { -self.tx_amount } else { self.tx_amount };
+                            // Check for sufficient funds if expense
+                            if self.tx_is_expense && account.balance < self.tx_amount {
+                                self.message = "Insufficient funds for this expense.".to_string();
+                            } else {
+                                let date_time = format!("{} 00:00:00", self.tx_date);
+
+                                match db::create_transaction(
+                                    &mut self.conn,
+                                    self.tx_account_id,
+                                    0, // contact_id - not used
+                                    amount,
+                                    self.tx_category.clone(),
+                                    date_time,
+                                ) {
+                                    Ok(_) => {
+                                        self.message = "Transaction added successfully!".to_string();
+                                        self.load_user_transactions();
+                                        self.load_user_categories();
+                                        self.load_user_budgets();
+                                        self.compute_budget_progress(self.period_offset);
+                                        // Reload accounts to show updated balance
+                                        if let Some(uid) = self.user_id {
+                                            self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                                        }
+                                        // Reset form
+                                        self.tx_amount = 0.0;
+                                        self.tx_is_expense = true;
+                                    }
+                                    Err(e) => {
+                                        self.message = format!("Failed to add transaction: {:?}", e);
+                                    }
                                 }
-                                // Reset form
-                                self.tx_amount = 0.0;
-                                self.tx_is_expense = true;
                             }
-                            Err(e) => {
-                                self.message = format!("Failed to add transaction: {:?}", e);
-                            }
+                        } else {
+                            self.message = "Selected account not found.".to_string();
                         }
                     } else {
-                        self.message = "Please select an account and enter an amount.".to_string();
+                        self.message = "Please select an account and enter a positive amount.".to_string();
                     }
                 }
             }
@@ -1084,34 +1095,40 @@ impl FinancerApp {
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
                         if let Some(tx_id) = self.tx_editing_id {
+                            // Always use positive value for amount
+                            let entered_amount = self.tx_editor_amount.abs();
                             let amount = if self.tx_editor_is_expense {
-                                -self.tx_editor_amount
+                                -entered_amount
                             } else {
-                                self.tx_editor_amount
+                                entered_amount
                             };
 
-                            match db::update_transaction(
-                                &mut self.conn,
-                                tx_id,
-                                self.tx_editor_account_id,
-                                amount,
-                                self.tx_editor_category.clone(),
-                                self.tx_editor_date.clone(),
-                            ) {
-                                Ok(_) => {
-                                    self.message = "Transaction updated successfully".to_string();
-                                    self.load_user_transactions();
-                                    self.load_user_budgets();
-                                    self.compute_budget_progress(self.period_offset);
-                                    
-                                    // Reload accounts to show updated balance
-                                    if let Some(uid) = self.user_id {
-                                        self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                            if entered_amount <= 0.0 {
+                                self.message = "Amount must be positive.".to_string();
+                            } else {
+                                match db::update_transaction(
+                                    &mut self.conn,
+                                    tx_id,
+                                    self.tx_editor_account_id,
+                                    amount,
+                                    self.tx_editor_category.clone(),
+                                    self.tx_editor_date.clone(),
+                                ) {
+                                    Ok(_) => {
+                                        self.message = "Transaction updated successfully".to_string();
+                                        self.load_user_transactions();
+                                        self.load_user_budgets();
+                                        self.compute_budget_progress(self.period_offset);
+
+                                        // Reload accounts to show updated balance
+                                        if let Some(uid) = self.user_id {
+                                            self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                                        }
+                                        should_close = true;
                                     }
-                                    should_close = true;
-                                }
-                                Err(e) => {
-                                    self.message = format!("Error updating transaction: {}", e);
+                                    Err(e) => {
+                                        self.message = format!("Error updating transaction: {}", e);
+                                    }
                                 }
                             }
                         }
