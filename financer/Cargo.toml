@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eframe = "0.24"
+eframe = "0.27"
+egui_plot = "0.27"
 diesel = { version = "2.3.3", features = ["sqlite"] }
 argon2 = "0.5"
 password-hash = "0.5"

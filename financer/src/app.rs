@@ -1,10 +1,16 @@
 use eframe::egui;
+use eframe::egui::Ui;
 use crate::db;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::{Error, DatabaseErrorKind};
 use crate::models::{Account, Transaction};
-
 use crate::models::{Budget, Period};
+use egui_plot::{Plot, BarChart, Bar, Line, PlotPoints, Text as PlotText};
+use egui::epaint::Shape;
+use std::collections::HashMap;
+use std::f32::consts::TAU;
+use chrono::{NaiveDateTime,NaiveDate,Datelike};
+use eframe::egui::Color32;
 
 const DEFAULT_CATEGORIES: &[&str] = &[
     "Food & Dining",
@@ -19,8 +25,6 @@ const DEFAULT_CATEGORIES: &[&str] = &[
     "Transfer",
     "Other",
 ];
-use chrono::NaiveDateTime;
-use std::collections::HashMap;
 
 pub enum AppState {
     Login,
@@ -132,6 +136,209 @@ impl FinancerApp {
             transfer_amount: 0.0,
             transfer_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
         }
+    }
+
+    // Budgeting display helpers
+    fn show_budget_bar_chart(&mut self, ui: &mut egui::Ui) {
+        let mut bars_spent = Vec::new();
+        let mut bars_limit = Vec::new();
+
+        for (i, b) in self.budgets.iter().enumerate() {
+            let spent = self
+                .budget_progress
+                .get(&b.id.unwrap_or(0))
+                .map(|(spent, _)| *spent as f32 / 100.0)
+                .unwrap_or(0.0);
+
+            let limit = b.limit_cents as f32 / 100.0;
+
+            bars_spent.push(
+                Bar::new(i as f64, spent as f64)
+                    .width(0.4)
+                    .fill(egui::Color32::RED),
+            );
+
+            bars_limit.push(
+                Bar::new(i as f64 + 0.4, limit as f64)
+                    .width(0.4)
+                    .fill(egui::Color32::GREEN),
+            );
+        }
+
+        let chart_spent = BarChart::new(bars_spent).name("Spent");
+        let chart_limit = BarChart::new(bars_limit).name("Limit");
+
+        Plot::new("budget_comparison")
+            .height(200.0)
+            .show(ui, |plot_ui| {
+                plot_ui.bar_chart(chart_spent);
+                plot_ui.bar_chart(chart_limit);
+            });
+
+        ui.label("Budgets: Spent vs Limit");
+    }
+
+    fn show_expense_pie_chart(&mut self, ui: &mut egui::Ui) {
+        // Step 1 — Collect negative transactions (expenses)
+        let mut category_totals: Vec<(String, f32)> = {
+            let mut map = HashMap::<String, f32>::new();
+            for tx in &self.transactions_list {
+                if tx.amount < 0.0 {
+                    *map.entry(tx.category.clone()).or_insert(0.0) += tx.amount.abs();
+                }
+            }
+            map.into_iter().collect()
+        };
+
+        if category_totals.is_empty() {
+            ui.label("No expense data available.");
+            return;
+        }
+
+        // Step 2 — Sort alphabetically for stable order
+        category_totals.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Step 3 — Total
+        let total: f32 = category_totals.iter().map(|(_, v)| *v).sum();
+
+        ui.label("Expense Breakdown");
+
+        // Draw space
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(160.0, 160.0),
+            egui::Sense::focusable_noninteractive(), // **static**
+        );
+
+        let painter = ui.painter();
+        let center = rect.center();
+        let radius = 70.0;
+
+        // Stable colors
+        let colors = [
+            egui::Color32::from_rgb(255, 99, 132),
+            egui::Color32::from_rgb(54, 162, 235),
+            egui::Color32::from_rgb(255, 206, 86),
+            egui::Color32::from_rgb(75, 192, 192),
+            egui::Color32::from_rgb(153, 102, 255),
+            egui::Color32::from_rgb(255, 159, 64),
+            egui::Color32::from_rgb(199, 199, 199),
+        ];
+
+        let mut start_angle = 0.0_f32;
+
+        // Draw slices
+        for (i, (_, amount)) in category_totals.iter().enumerate() {
+            let proportion = *amount / total;
+            let sweep = TAU * proportion;
+            let end_angle = start_angle + sweep;
+
+            // Slice polygon points
+            let segments = 60;
+            let mut points = Vec::with_capacity(segments + 2);
+            points.push(center);
+
+            for s in 0..=segments {
+                let t = start_angle + (s as f32 / segments as f32) * sweep;
+                points.push(center + egui::vec2(t.cos(), t.sin()) * radius);
+            }
+
+            painter.add(egui::Shape::convex_polygon(
+                points,
+                colors[i % colors.len()],
+                egui::Stroke::NONE,
+            ));
+
+            // Percentage label
+            let mid_angle = (start_angle + end_angle) / 2.0;
+            let label_pos =
+                center + egui::vec2(mid_angle.cos(), mid_angle.sin()) * (radius * 0.55);
+
+            painter.text(
+                label_pos,
+                egui::Align2::CENTER_CENTER,
+                format!("{:.0}%", proportion * 100.0),
+                egui::FontId::proportional(12.0),
+                egui::Color32::BLACK,
+            );
+
+            start_angle = end_angle;
+        }
+
+        ui.separator();
+
+        // Legend
+        ui.label("Legend:");
+        for (i, (category, amount)) in category_totals.iter().enumerate() {
+            ui.horizontal(|ui| {
+                // Allocate a fixed rectangle for the color swatch
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(14.0, 14.0),
+                    egui::Sense::hover(),
+                );
+
+                ui.painter().rect_filled(rect, 2.0, colors[i % colors.len()]);
+
+                ui.label(format!("{} — ${:.2}", category, amount));
+            });
+
+            ui.add_space(4.0);
+        }
+    }
+
+    fn show_income_line_chart(&mut self, ui: &mut Ui) {
+        // Aggregate income by month/year
+        let mut income_by_month: Vec<((i32, u32), f32)> = Vec::new(); // (year, month), total income
+
+        for tx in &self.transactions_list {
+            if tx.amount > 0.0 {
+                if let Ok(date) = NaiveDate::parse_from_str(&tx.date, "%Y-%m-%d %H:%M:%S") {
+                    let key = (date.year(), date.month());
+                    if let Some(entry) = income_by_month.iter_mut().find(|e| e.0 == key) {
+                        entry.1 += tx.amount;
+                    } else {
+                        income_by_month.push((key, tx.amount));
+                    }
+                }
+            }
+        }
+
+        if income_by_month.is_empty() {
+            ui.label("No income data available.");
+            return;
+        }
+
+        // Sort by year/month
+        income_by_month.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Build plot points and x-axis labels
+        let mut points: Vec<[f64; 2]> = Vec::new();
+        let mut x_labels: Vec<PlotText> = Vec::new();
+
+        for (idx, ((year, month), amount)) in income_by_month.iter().enumerate() {
+            points.push([idx as f64, *amount as f64]);
+
+            let label = NaiveDate::from_ymd_opt(*year, *month, 1)
+                .unwrap()
+                .format("%b %Y")
+                .to_string();
+
+            // Convert [f64;2] → PlotPoint using .into()
+            x_labels.push(PlotText::new([idx as f64, 0.0].into(), label));
+        }
+        let desired_size = egui::vec2(200.0, 150.0); // width x height
+            ui.allocate_ui(desired_size, |ui| {
+                Plot::new("income_line_plot")
+                    .allow_scroll(false)
+                    .allow_zoom(false)
+                    .show(ui, |plot_ui| {
+                        plot_ui.line(Line::new(points.clone()).color(Color32::LIGHT_GREEN));
+
+                        for label in x_labels {
+                            plot_ui.text(label);
+                        }
+            });
+        });
+
     }
 
     // Transaction helpers
@@ -429,6 +636,23 @@ impl FinancerApp {
             if ui.button("Back").clicked() {
                 self.screen = AppState::Dashboard;
             }
+
+            ui.separator();
+            ui.heading("Charts");
+
+            ui.columns(3, |cols| {
+                cols[0].vertical(|ui| {
+                    self.show_budget_bar_chart(ui);
+                });
+
+                cols[1].vertical(|ui| {
+                    self.show_expense_pie_chart(ui);
+                });
+
+                cols[2].vertical(|ui| {
+                    self.show_income_line_chart(ui);
+                });
+            });
 
             ui.separator();
 
