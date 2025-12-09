@@ -2,6 +2,7 @@ mod app;
 mod db;
 mod models;
 mod schema;
+mod finance_calculations;
 
 use eframe::NativeOptions;
 use app::FinancerApp;
