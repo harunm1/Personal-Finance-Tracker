@@ -1679,6 +1679,61 @@ impl FinancerApp {
             ui.separator();
             ui.label(&self.message);
 
+            ui.horizontal(|ui| {
+                if ui.button("Export CSV").clicked() {
+                    let file_path = format!(
+                        "transfers_{}_to_{}.csv",
+                        self.transfer_filter_start_date.replace("-", ""),
+                        self.transfer_filter_end_date.replace("-", "")
+                    );
+                    // Collect filtered transfers (same filter as below)
+                    let filtered_transfers: Vec<&Transaction> = self.transactions_list
+                        .iter()
+                        .filter(|tx| {
+                            if tx.category != "Transfer" {
+                                return false;
+                            }
+                            let tx_date = &tx.date[..10]; // Extract YYYY-MM-DD
+                            let start_match = if !self.transfer_filter_start_date.is_empty() {
+                                tx_date >= self.transfer_filter_start_date.as_str()
+                            } else {
+                                true
+                            };
+                            let end_match = if !self.transfer_filter_end_date.is_empty() {
+                                tx_date <= self.transfer_filter_end_date.as_str()
+                            } else {
+                                true
+                            };
+                            start_match && end_match
+                        })
+                        .collect();
+
+                    let mut wtr = csv::Writer::from_path(&file_path);
+                    match wtr {
+                        Ok(mut writer) => {
+                            // Write header
+                            let _ = writer.write_record(&[
+                                "id", "user_account_id", "amount", "category", "date"
+                            ]);
+                            for tx in &filtered_transfers {
+                                let _ = writer.write_record(&[
+                                    tx.id.to_string(),
+                                    tx.user_account_id.to_string(),
+                                    tx.amount.to_string(),
+                                    tx.category.clone(),
+                                    tx.date.clone(),
+                                ]);
+                            }
+                            let _ = writer.flush();
+                            self.message = format!("Exported {} transfers to {}", filtered_transfers.len(), file_path);
+                        }
+                        Err(e) => {
+                            self.message = format!("Failed to export transfers: {}", e);
+                        }
+                    }
+                }
+            });
+
             ui.separator();
             ui.heading("Transfer History");
             
