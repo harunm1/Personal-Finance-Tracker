@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::f32::consts::TAU;
 use chrono::{NaiveDateTime,NaiveDate,Datelike};
 use eframe::egui::Color32;
+use csv::Writer;
 
 const DEFAULT_CATEGORIES: &[&str] = &[
     "Food & Dining",
@@ -1198,6 +1199,73 @@ impl FinancerApp {
             ui.label(&self.message);
 
             ui.separator();
+
+            ui.horizontal(|ui| {
+                if ui.button("Export CSV").clicked() {
+                    let file_path = format!(
+                        "transactions_{}_to_{}.csv",
+                        self.tx_filter_start_date.replace("-", ""),
+                        self.tx_filter_end_date.replace("-", "")
+                    );
+                    // Collect filtered transactions (same filter as below)
+                    let filtered_transactions: Vec<&Transaction> = self.transactions_list
+                        .iter()
+                        .filter(|tx| {
+                            let account_match = if let Some(filter_id) = self.tx_filter_account_id {
+                                tx.user_account_id == filter_id
+                            } else {
+                                true
+                            };
+                            let category_match = if let Some(ref filter_cat) = self.tx_filter_category {
+                                &tx.category == filter_cat
+                            } else {
+                                true
+                            };
+                            let date_match = {
+                                let tx_date = &tx.date[..10];
+                                let start_match = if !self.tx_filter_start_date.is_empty() {
+                                    tx_date >= self.tx_filter_start_date.as_str()
+                                } else {
+                                    true
+                                };
+                                let end_match = if !self.tx_filter_end_date.is_empty() {
+                                    tx_date <= self.tx_filter_end_date.as_str()
+                                } else {
+                                    true
+                                };
+                                start_match && end_match
+                            };
+                            account_match && category_match && date_match
+                        })
+                        .collect();
+
+                    let mut wtr = Writer::from_path(&file_path);
+                    match wtr {
+                        Ok(mut writer) => {
+                            let _ = writer.write_record(&[
+                                "id", "account_id", "contact_id", "amount", "category", "date", "amount_cents", "balance_after"
+                            ]);
+                            for tx in &filtered_transactions {
+                                let _ = writer.write_record(&[
+                                    tx.id.to_string(),
+                                    tx.user_account_id.to_string(),
+                                    tx.contact_id.to_string(),
+                                    tx.amount.to_string(),
+                                    tx.category.clone(),
+                                    tx.date.clone(),
+                                    tx.amount_cents.to_string(),
+                                    tx.balance_after.to_string(),
+                                ]);
+                            }
+                            let _ = writer.flush();
+                            self.message = format!("Exported {} transactions to {}", filtered_transactions.len(), file_path);
+                        }
+                        Err(e) => {
+                            self.message = format!("Failed to export CSV: {}", e);
+                        }
+                    }
+                }
+            });            
             
             // Filter section
             ui.horizontal(|ui| {
