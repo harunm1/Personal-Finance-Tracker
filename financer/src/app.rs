@@ -452,10 +452,22 @@ impl FinancerApp {
             if self.accounts_list.is_empty() {
                 ui.label("No accounts found. Please create one.");
             } else {
+                let mut clicked_account_id: Option<i32> = None;
+                
                 for account in &self.accounts_list {
                     ui.horizontal(|ui| {
-                        ui.label(format!("{} - {}: ${:.2}", account.name, account.account_type, account.balance));
+                        if ui.button(format!("{} - {}: ${:.2}", account.name, account.account_type, account.balance)).clicked() {
+                            clicked_account_id = Some(account.id);
+                        }
                     });
+                }
+                
+                // Handle click outside the loop to avoid borrow issues
+                if let Some(account_id) = clicked_account_id {
+                    self.tx_filter_account_id = Some(account_id);
+                    self.screen = AppState::Transactions;
+                    self.load_user_transactions();
+                    self.load_user_categories();
                 }
             }
 
