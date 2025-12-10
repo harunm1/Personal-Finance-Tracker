@@ -78,11 +78,15 @@ pub struct FinancerApp {
     // Transaction filter
     tx_filter_account_id: Option<i32>,
     tx_filter_category: Option<String>,
+    tx_filter_start_date: String,
+    tx_filter_end_date: String,
     // Transfer fields
     transfer_from_account_id: i32,
     transfer_to_account_id: i32,
     transfer_amount: f32,
     transfer_date: String,
+    transfer_filter_start_date: String,
+    transfer_filter_end_date: String,
 }
 
 impl FinancerApp {
@@ -130,11 +134,15 @@ impl FinancerApp {
             // Transaction filter initialization
             tx_filter_account_id: None,
             tx_filter_category: None,
+            tx_filter_start_date: chrono::Local::now().date_naive().with_day(1).unwrap().format("%Y-%m-%d").to_string(),
+            tx_filter_end_date: chrono::Local::now().date_naive().format("%Y-%m-%d").to_string(),
             // Transfer initialization
             transfer_from_account_id: 0,
             transfer_to_account_id: 0,
             transfer_amount: 0.0,
             transfer_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            transfer_filter_start_date: chrono::Local::now().date_naive().with_day(1).unwrap().format("%Y-%m-%d").to_string(),
+            transfer_filter_end_date: chrono::Local::now().date_naive().format("%Y-%m-%d").to_string(),
         }
     }
 
@@ -352,6 +360,82 @@ impl FinancerApp {
         all
     }
 
+    // Helper function to show date selector with dropdowns
+    fn show_date_selector(ui: &mut egui::Ui, date_string: &mut String, id_prefix: &str) {
+        use chrono::Datelike;
+        
+        // Parse current date or use today as default
+        let current_date = chrono::NaiveDate::parse_from_str(date_string, "%Y-%m-%d")
+            .unwrap_or_else(|_| chrono::Local::now().date_naive());
+        
+        let mut year = current_date.year();
+        let mut month = current_date.month();
+        let mut day = current_date.day();
+        
+        let mut changed = false;
+        
+        // Year dropdown
+        egui::ComboBox::from_id_source(format!("{}_year", id_prefix))
+            .selected_text(format!("{}", year))
+            .width(70.0)
+            .show_ui(ui, |ui| {
+                for y in (2020..=2030).rev() {
+                    if ui.selectable_value(&mut year, y, format!("{}", y)).clicked() {
+                        changed = true;
+                    }
+                }
+            });
+        
+        ui.label("-");
+        
+        // Month dropdown
+        let month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        egui::ComboBox::from_id_source(format!("{}_month", id_prefix))
+            .selected_text(month_names[(month - 1) as usize])
+            .width(50.0)
+            .show_ui(ui, |ui| {
+                for m in 1..=12 {
+                    if ui.selectable_value(&mut month, m, month_names[(m - 1) as usize]).clicked() {
+                        changed = true;
+                    }
+                }
+            });
+        
+        ui.label("-");
+        
+        // Day dropdown
+        let max_day = match month {
+            2 => if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 29 } else { 28 },
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+        
+        // Clamp day if needed
+        if day > max_day {
+            day = max_day;
+            changed = true;
+        }
+        
+        egui::ComboBox::from_id_source(format!("{}_day", id_prefix))
+            .selected_text(format!("{:02}", day))
+            .width(45.0)
+            .show_ui(ui, |ui| {
+                for d in 1..=max_day {
+                    if ui.selectable_value(&mut day, d, format!("{:02}", d)).clicked() {
+                        changed = true;
+                    }
+                }
+            });
+        
+        // Update the date string if changed
+        if changed {
+            if let Some(new_date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
+                *date_string = new_date.format("%Y-%m-%d").to_string();
+            }
+        }
+    }
+
     fn show_login(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("FinanceR Login");
@@ -528,6 +612,7 @@ impl FinancerApp {
             }
 
             if ui.button("Transactions").clicked() {
+                self.tx_filter_account_id = None; // Clear account filter when navigating via button
                 self.screen = AppState::Transactions;
                 self.load_user_transactions();
                 self.load_user_categories();
@@ -1056,8 +1141,7 @@ impl FinancerApp {
             // Date
             ui.horizontal(|ui| {
                 ui.label("Date:");
-                ui.text_edit_singleline(&mut self.tx_date);
-                ui.label("(YYYY-MM-DD)");
+                Self::show_date_selector(ui, &mut self.tx_date, "tx_date");
             });
 
             // Submit button
@@ -1161,6 +1245,32 @@ impl FinancerApp {
                         }
                     });
             });
+            
+            // Date filter row
+            ui.horizontal(|ui| {
+                ui.label("Filter by Date Range:");
+                
+                // From date selector
+                ui.label("From:");
+                Self::show_date_selector(ui, &mut self.tx_filter_start_date, "tx_filter_start");
+                
+                ui.separator();
+                
+                // To date selector
+                ui.label("To:");
+                Self::show_date_selector(ui, &mut self.tx_filter_end_date, "tx_filter_end");
+                
+                if ui.button("This Month").clicked() {
+                    let today = chrono::Local::now().date_naive();
+                    self.tx_filter_start_date = today.with_day(1).unwrap().format("%Y-%m-%d").to_string();
+                    self.tx_filter_end_date = today.format("%Y-%m-%d").to_string();
+                }
+                
+                if ui.button("All Time").clicked() {
+                    self.tx_filter_start_date = "2000-01-01".to_string();
+                    self.tx_filter_end_date = "2099-12-31".to_string();
+                }
+            });
 
             // Transaction list with filtering
             let mut tx_to_edit: Option<Transaction> = None;
@@ -1182,7 +1292,26 @@ impl FinancerApp {
                             true
                         };
                         
-                        account_match && category_match
+                        // Date filtering
+                        let date_match = {
+                            let tx_date = &tx.date[..10]; // Extract YYYY-MM-DD from "YYYY-MM-DD HH:MM:SS"
+                            
+                            let start_match = if !self.tx_filter_start_date.is_empty() {
+                                tx_date >= self.tx_filter_start_date.as_str()
+                            } else {
+                                true
+                            };
+                            
+                            let end_match = if !self.tx_filter_end_date.is_empty() {
+                                tx_date <= self.tx_filter_end_date.as_str()
+                            } else {
+                                true
+                            };
+                            
+                            start_match && end_match
+                        };
+                        
+                        account_match && category_match && date_match
                     })
                     .collect();
 
@@ -1227,7 +1356,8 @@ impl FinancerApp {
                 self.tx_editor_account_id = tx.user_account_id;
                 self.tx_editor_amount = tx.amount.abs();
                 self.tx_editor_category = tx.category.clone();
-                self.tx_editor_date = tx.date.clone();
+                // Extract just the date part (YYYY-MM-DD) from the full datetime string
+                self.tx_editor_date = tx.date[..10].to_string();
                 self.tx_editor_is_expense = tx.amount < 0.0;
             }
 
@@ -1302,7 +1432,7 @@ impl FinancerApp {
                 // Date
                 ui.horizontal(|ui| {
                     ui.label("Date:");
-                    ui.text_edit_singleline(&mut self.tx_editor_date);
+                    Self::show_date_selector(ui, &mut self.tx_editor_date, "tx_editor_date");
                 });
 
                 ui.horizontal(|ui| {
@@ -1319,13 +1449,16 @@ impl FinancerApp {
                             if entered_amount <= 0.0 {
                                 self.message = "Amount must be positive.".to_string();
                             } else {
+                                // Format date with time for database
+                                let date_time = format!("{} 00:00:00", self.tx_editor_date);
+                                
                                 match db::update_transaction(
                                     &mut self.conn,
                                     tx_id,
                                     self.tx_editor_account_id,
                                     amount,
                                     self.tx_editor_category.clone(),
-                                    self.tx_editor_date.clone(),
+                                    date_time,
                                 ) {
                                     Ok(_) => {
                                         self.message = "Transaction updated successfully".to_string();
@@ -1428,8 +1561,7 @@ impl FinancerApp {
             // Date
             ui.horizontal(|ui| {
                 ui.label("Date:");
-                ui.text_edit_singleline(&mut self.transfer_date);
-                ui.label("(YYYY-MM-DD)");
+                Self::show_date_selector(ui, &mut self.transfer_date, "transfer_date");
             });
 
             // Transfer button
@@ -1481,12 +1613,59 @@ impl FinancerApp {
 
             ui.separator();
             ui.heading("Transfer History");
+            
+            // Date filter for transfers
+            ui.horizontal(|ui| {
+                ui.label("Filter by Date Range:");
+                
+                // From date selector
+                ui.label("From:");
+                Self::show_date_selector(ui, &mut self.transfer_filter_start_date, "transfer_filter_start");
+                
+                ui.separator();
+                
+                // To date selector
+                ui.label("To:");
+                Self::show_date_selector(ui, &mut self.transfer_filter_end_date, "transfer_filter_end");
+                
+                if ui.button("This Month").clicked() {
+                    let today = chrono::Local::now().date_naive();
+                    self.transfer_filter_start_date = today.with_day(1).unwrap().format("%Y-%m-%d").to_string();
+                    self.transfer_filter_end_date = today.format("%Y-%m-%d").to_string();
+                }
+                
+                if ui.button("All Time").clicked() {
+                    self.transfer_filter_start_date = "2000-01-01".to_string();
+                    self.transfer_filter_end_date = "2099-12-31".to_string();
+                }
+            });
 
             // Show only Transfer transactions
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let transfer_transactions: Vec<&Transaction> = self.transactions_list
                     .iter()
-                    .filter(|tx| tx.category == "Transfer")
+                    .filter(|tx| {
+                        if tx.category != "Transfer" {
+                            return false;
+                        }
+                        
+                        // Date filtering
+                        let tx_date = &tx.date[..10]; // Extract YYYY-MM-DD
+                        
+                        let start_match = if !self.transfer_filter_start_date.is_empty() {
+                            tx_date >= self.transfer_filter_start_date.as_str()
+                        } else {
+                            true
+                        };
+                        
+                        let end_match = if !self.transfer_filter_end_date.is_empty() {
+                            tx_date <= self.transfer_filter_end_date.as_str()
+                        } else {
+                            true
+                        };
+                        
+                        start_match && end_match
+                    })
                     .collect();
 
                 if transfer_transactions.is_empty() {
