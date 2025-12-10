@@ -1,7 +1,7 @@
 mod app;
 mod db;
 mod models;
-mod schema;
+pub mod schema;
 
 use eframe::NativeOptions;
 use app::FinancerApp;
