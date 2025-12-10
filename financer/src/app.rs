@@ -5,7 +5,7 @@ use diesel::sqlite::SqliteConnection;
 use diesel::result::{Error, DatabaseErrorKind};
 use crate::models::{Account, Transaction};
 use crate::models::{Budget, Period};
-use egui_plot::{Plot, BarChart, Bar, Line, PlotPoints, Text as PlotText};
+use egui_plot::{Plot, Line, PlotPoints, Text as PlotText};
 use egui::epaint::Shape;
 use std::collections::HashMap;
 use std::f32::consts::TAU;
@@ -139,47 +139,6 @@ impl FinancerApp {
     }
 
     // Budgeting display helpers
-    fn show_budget_bar_chart(&mut self, ui: &mut egui::Ui) {
-        let mut bars_spent = Vec::new();
-        let mut bars_limit = Vec::new();
-
-        for (i, b) in self.budgets.iter().enumerate() {
-            let spent = self
-                .budget_progress
-                .get(&b.id.unwrap_or(0))
-                .map(|(spent, _)| *spent as f32 / 100.0)
-                .unwrap_or(0.0);
-
-            let limit = b.limit_cents as f32 / 100.0;
-
-            bars_spent.push(
-                Bar::new(i as f64, spent as f64)
-                    .width(0.4)
-                    .fill(egui::Color32::RED),
-            );
-
-            bars_limit.push(
-                Bar::new(i as f64 + 0.4, limit as f64)
-                    .width(0.4)
-                    .fill(egui::Color32::GREEN),
-            );
-        }
-
-        let chart_spent = BarChart::new(bars_spent).name("Spent");
-        let chart_limit = BarChart::new(bars_limit).name("Limit");
-
-        ui.vertical_centered(|ui| {
-            ui.label("Budgets: Spent vs Limit");
-            Plot::new("budget_comparison")
-            .height(200.0)
-            .show(ui, |plot_ui| {
-                plot_ui.bar_chart(chart_spent);
-                plot_ui.bar_chart(chart_limit);
-            });
-        });
-
-    }
-
     fn show_expense_pie_chart(&mut self, ui: &mut egui::Ui) {
         // Get the current period range
         let (start, end) = Self::get_period_range(self.selected_budget_period, self.period_offset);
@@ -303,11 +262,11 @@ impl FinancerApp {
 
     fn show_income_line_chart(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            ui.add_space(40.0); // Horizontal space to push content right
+            ui.add_space(10.0); // Horizontal space to push content right
 
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.add_space(80.0); // Fine-tune this value for more/less right shift
+                    ui.add_space(40.0); // Fine-tune this value for more/less right shift
                     ui.label("Income Progression");
                 });
 
@@ -345,7 +304,7 @@ impl FinancerApp {
                         .to_string();
                     x_labels.push(PlotText::new([idx as f64, 0.0].into(), label));
                 }
-                let desired_size = egui::vec2(200.0, 150.0);
+                let desired_size = egui::vec2(350.0, 180.0);
                 ui.allocate_ui(desired_size, |ui| {
                     Plot::new("income_line_plot")
                         .allow_scroll(false)
@@ -860,16 +819,12 @@ impl FinancerApp {
         ui.heading("Charts");
 
         // Use ui.columns outside of a horizontal layout
-        ui.columns(3, |cols| {
+        ui.columns(2, |cols| {
             cols[0].vertical(|ui| {
-                self.show_budget_bar_chart(ui);
-            });
-
-            cols[1].vertical(|ui| {
                 self.show_expense_pie_chart(ui);
             });
 
-            cols[2].vertical(|ui| {
+            cols[1].vertical(|ui| {
                 self.show_income_line_chart(ui);
             });
         });
