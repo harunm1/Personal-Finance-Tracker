@@ -1,7 +1,7 @@
 mod app;
 mod db;
 mod models;
-mod schema;
+pub mod schema;
 mod finance_calculations;
 
 use eframe::NativeOptions;

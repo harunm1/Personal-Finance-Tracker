@@ -1,9 +1,9 @@
 use eframe::egui;
+use eframe::egui::Ui;
 use crate::db;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::{Error, DatabaseErrorKind};
 use crate::models::{Account, Transaction};
-
 use crate::models::{Budget, Period};
 use crate::finance_calculations::{
     real_rate,
@@ -16,6 +16,12 @@ use crate::finance_calculations::{
     mortgage_payment_with_frequency,
     mortgage_amortization_schedule_with_frequency,
 };
+use egui_plot::{Plot, Line, PlotPoints, Text as PlotText};
+use egui::epaint::Shape;
+use std::collections::HashMap;
+use std::f32::consts::TAU;
+use chrono::{NaiveDateTime,NaiveDate,Datelike};
+use eframe::egui::Color32;
 
 const DEFAULT_CATEGORIES: &[&str] = &[
     "Food & Dining",
@@ -30,8 +36,6 @@ const DEFAULT_CATEGORIES: &[&str] = &[
     "Transfer",
     "Other",
 ];
-use chrono::{NaiveDate, NaiveDateTime};
-use std::collections::HashMap;
 
 pub enum AppState {
     Login,
@@ -252,6 +256,188 @@ impl FinancerApp {
             mort_a_frequency: PaymentFrequency::Monthly,
             mort_b_frequency: PaymentFrequency::Monthly,
         }
+    }
+
+    // Budgeting display helpers
+    fn show_expense_pie_chart(&mut self, ui: &mut egui::Ui) {
+        // Get the current period range
+        let (start, end) = Self::get_period_range(self.selected_budget_period, self.period_offset);
+
+        // Collect negative transactions (expenses) for the current period
+        let mut category_totals: Vec<(String, f32)> = {
+            let mut map = std::collections::HashMap::<String, f32>::new();
+            for tx in &self.transactions_list {
+                // Parse date and filter by period
+                if let Ok(date) = chrono::NaiveDateTime::parse_from_str(&tx.date, "%Y-%m-%d %H:%M:%S") {
+                    if date >= start && date < end && tx.amount < 0.0 {
+                        *map.entry(tx.category.clone()).or_insert(0.0) += tx.amount.abs();
+                    }
+                }
+            }
+            map.into_iter().collect()
+        };
+
+        if category_totals.is_empty() {
+            ui.label("No expense data available for this period.");
+            return;
+        }
+
+        // Sort alphabetically for stable order
+        category_totals.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Total
+        let total: f32 = category_totals.iter().map(|(_, v)| *v).sum();
+
+        ui.label("Expense Breakdown");
+
+        // Horizontal layout: pie chart on left, legend on right
+        ui.horizontal(|ui| {
+            // Pie chart
+            ui.vertical(|ui| {
+                // Add dynamic vertical space above the pie chart
+                let available_height = ui.available_height();
+                ui.add_space(available_height * 0.05);
+
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(160.0, 160.0),
+                    egui::Sense::focusable_noninteractive(),
+                );
+                let painter = ui.painter();
+                let center = rect.center();
+                let radius = 70.0;
+
+                // Stable colors
+                let colors = [
+                    egui::Color32::from_rgb(255, 99, 132),
+                    egui::Color32::from_rgb(54, 162, 235),
+                    egui::Color32::from_rgb(255, 206, 86),
+                    egui::Color32::from_rgb(75, 192, 192),
+                    egui::Color32::from_rgb(153, 102, 255),
+                    egui::Color32::from_rgb(255, 159, 64),
+                    egui::Color32::from_rgb(199, 199, 199),
+                ];
+
+                let mut start_angle = 0.0_f32;
+                for (i, (_, amount)) in category_totals.iter().enumerate() {
+                    let proportion = *amount / total;
+                    let sweep = std::f32::consts::TAU * proportion;
+                    let end_angle = start_angle + sweep;
+
+                    let segments = 60;
+                    let mut points = Vec::with_capacity(segments + 2);
+                    points.push(center);
+                    for s in 0..=segments {
+                        let t = start_angle + (s as f32 / segments as f32) * sweep;
+                        points.push(center + egui::vec2(t.cos(), t.sin()) * radius);
+                    }
+                    painter.add(egui::Shape::convex_polygon(
+                        points,
+                        colors[i % colors.len()],
+                        egui::Stroke::NONE,
+                    ));
+
+                    // Percentage label
+                    let mid_angle = (start_angle + end_angle) / 2.0;
+                    let label_pos =
+                        center + egui::vec2(mid_angle.cos(), mid_angle.sin()) * (radius * 0.55);
+                    painter.text(
+                        label_pos,
+                        egui::Align2::CENTER_CENTER,
+                        format!("{:.0}%", proportion * 100.0),
+                        egui::FontId::proportional(12.0),
+                        egui::Color32::BLACK,
+                    );
+
+                    start_angle = end_angle;
+                }
+            });
+
+            // Legend
+            ui.vertical(|ui| {
+                ui.label("Legend:");
+                for (i, (category, amount)) in category_totals.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(14.0, 14.0),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().rect_filled(rect, 2.0, [
+                            egui::Color32::from_rgb(255, 99, 132),
+                            egui::Color32::from_rgb(54, 162, 235),
+                            egui::Color32::from_rgb(255, 206, 86),
+                            egui::Color32::from_rgb(75, 192, 192),
+                            egui::Color32::from_rgb(153, 102, 255),
+                            egui::Color32::from_rgb(255, 159, 64),
+                            egui::Color32::from_rgb(199, 199, 199),
+                        ][i % 7]);
+                        ui.label(format!("{} — ${:.2}", category, amount));
+                    });
+                    ui.add_space(4.0);
+                }
+            });
+        });
+
+        ui.separator();
+    }
+
+    fn show_income_line_chart(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.add_space(10.0); // Horizontal space to push content right
+
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(40.0); // Fine-tune this value for more/less right shift
+                    ui.label("Income Progression");
+                });
+
+                // Aggregate income by month/year
+                let mut income_by_month: Vec<((i32, u32), f32)> = Vec::new();
+
+                for tx in &self.transactions_list {
+                    if tx.amount > 0.0 {
+                        if let Ok(date) = NaiveDate::parse_from_str(&tx.date, "%Y-%m-%d %H:%M:%S") {
+                            let key = (date.year(), date.month());
+                            if let Some(entry) = income_by_month.iter_mut().find(|e| e.0 == key) {
+                                entry.1 += tx.amount;
+                            } else {
+                                income_by_month.push((key, tx.amount));
+                            }
+                        }
+                    }
+                }
+
+                if income_by_month.is_empty() {
+                    ui.label("No income data available.");
+                    return;
+                }
+
+                income_by_month.sort_by(|a, b| a.0.cmp(&b.0));
+
+                let mut points: Vec<[f64; 2]> = Vec::new();
+                let mut x_labels: Vec<PlotText> = Vec::new();
+
+                for (idx, ((year, month), amount)) in income_by_month.iter().enumerate() {
+                    points.push([idx as f64, *amount as f64]);
+                    let label = NaiveDate::from_ymd_opt(*year, *month, 1)
+                        .unwrap()
+                        .format("%b %Y")
+                        .to_string();
+                    x_labels.push(PlotText::new([idx as f64, 0.0].into(), label));
+                }
+                let desired_size = egui::vec2(350.0, 180.0);
+                ui.allocate_ui(desired_size, |ui| {
+                    Plot::new("income_line_plot")
+                        .allow_scroll(false)
+                        .allow_zoom(false)
+                        .show(ui, |plot_ui| {
+                            plot_ui.line(Line::new(points.clone()).color(Color32::LIGHT_GREEN));
+                            for label in &x_labels {
+                                plot_ui.text(label.clone());
+                            }
+                        });
+                });
+            });
+        });
     }
 
     // Transaction helpers
@@ -555,8 +741,9 @@ impl FinancerApp {
     }
 
     fn show_budgets(&mut self, ctx: &egui::Context) {
-    use egui::Color32;
-    egui::CentralPanel::default().show(ctx, |ui| {
+        self.load_user_transactions();
+        use egui::Color32;
+        egui::CentralPanel::default().show(ctx, |ui| {
         ui.heading("Budgets");
 
         ui.horizontal(|ui| {
@@ -760,6 +947,20 @@ impl FinancerApp {
                     }
                 }
             }
+        });
+
+        ui.separator();
+        ui.heading("Charts");
+
+        // Use ui.columns outside of a horizontal layout
+        ui.columns(2, |cols| {
+            cols[0].vertical(|ui| {
+                self.show_expense_pie_chart(ui);
+            });
+
+            cols[1].vertical(|ui| {
+                self.show_income_line_chart(ui);
+            });
         });
     });
 
@@ -984,38 +1185,49 @@ impl FinancerApp {
             // Submit button
             if ui.button("Add Transaction").clicked() {
                 if let Some(_uid) = self.user_id {
-                    if self.tx_account_id > 0 && self.tx_amount != 0.0 {
-                        let amount = if self.tx_is_expense { -self.tx_amount.abs() } else { self.tx_amount.abs() };
-                        let date_time = format!("{} 00:00:00", self.tx_date);
-                        
-                        match db::create_transaction(
-                            &mut self.conn,
-                            self.tx_account_id,
-                            0, // contact_id - not used
-                            amount,
-                            self.tx_category.clone(),
-                            date_time,
-                        ) {
-                            Ok(_) => {
-                                self.message = "Transaction added successfully!".to_string();
-                                self.load_user_transactions();
-                                self.load_user_categories();
-                                self.load_user_budgets();
-                                self.compute_budget_progress(self.period_offset);
-                                // Reload accounts to show updated balance
-                                if let Some(uid) = self.user_id {
-                                    self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                    if self.tx_account_id > 0 && self.tx_amount > 0.0 {
+                        // Find the selected account
+                        let account_opt = self.accounts_list.iter().find(|a| a.id == self.tx_account_id);
+                        if let Some(account) = account_opt {
+                            let amount = if self.tx_is_expense { -self.tx_amount } else { self.tx_amount };
+                            // Check for sufficient funds if expense
+                            if self.tx_is_expense && account.balance < self.tx_amount {
+                                self.message = "Insufficient funds for this expense.".to_string();
+                            } else {
+                                let date_time = format!("{} 00:00:00", self.tx_date);
+
+                                match db::create_transaction(
+                                    &mut self.conn,
+                                    self.tx_account_id,
+                                    0, // contact_id - not used
+                                    amount,
+                                    self.tx_category.clone(),
+                                    date_time,
+                                ) {
+                                    Ok(_) => {
+                                        self.message = "Transaction added successfully!".to_string();
+                                        self.load_user_transactions();
+                                        self.load_user_categories();
+                                        self.load_user_budgets();
+                                        self.compute_budget_progress(self.period_offset);
+                                        // Reload accounts to show updated balance
+                                        if let Some(uid) = self.user_id {
+                                            self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                                        }
+                                        // Reset form
+                                        self.tx_amount = 0.0;
+                                        self.tx_is_expense = true;
+                                    }
+                                    Err(e) => {
+                                        self.message = format!("Failed to add transaction: {:?}", e);
+                                    }
                                 }
-                                // Reset form
-                                self.tx_amount = 0.0;
-                                self.tx_is_expense = true;
                             }
-                            Err(e) => {
-                                self.message = format!("Failed to add transaction: {:?}", e);
-                            }
+                        } else {
+                            self.message = "Selected account not found.".to_string();
                         }
                     } else {
-                        self.message = "Please select an account and enter an amount.".to_string();
+                        self.message = "Please select an account and enter a positive amount.".to_string();
                     }
                 }
             }
@@ -1218,34 +1430,40 @@ impl FinancerApp {
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
                         if let Some(tx_id) = self.tx_editing_id {
+                            // Always use positive value for amount
+                            let entered_amount = self.tx_editor_amount.abs();
                             let amount = if self.tx_editor_is_expense {
-                                -self.tx_editor_amount
+                                -entered_amount
                             } else {
-                                self.tx_editor_amount
+                                entered_amount
                             };
 
-                            match db::update_transaction(
-                                &mut self.conn,
-                                tx_id,
-                                self.tx_editor_account_id,
-                                amount,
-                                self.tx_editor_category.clone(),
-                                self.tx_editor_date.clone(),
-                            ) {
-                                Ok(_) => {
-                                    self.message = "Transaction updated successfully".to_string();
-                                    self.load_user_transactions();
-                                    self.load_user_budgets();
-                                    self.compute_budget_progress(self.period_offset);
-                                    
-                                    // Reload accounts to show updated balance
-                                    if let Some(uid) = self.user_id {
-                                        self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                            if entered_amount <= 0.0 {
+                                self.message = "Amount must be positive.".to_string();
+                            } else {
+                                match db::update_transaction(
+                                    &mut self.conn,
+                                    tx_id,
+                                    self.tx_editor_account_id,
+                                    amount,
+                                    self.tx_editor_category.clone(),
+                                    self.tx_editor_date.clone(),
+                                ) {
+                                    Ok(_) => {
+                                        self.message = "Transaction updated successfully".to_string();
+                                        self.load_user_transactions();
+                                        self.load_user_budgets();
+                                        self.compute_budget_progress(self.period_offset);
+
+                                        // Reload accounts to show updated balance
+                                        if let Some(uid) = self.user_id {
+                                            self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                                        }
+                                        should_close = true;
                                     }
-                                    should_close = true;
-                                }
-                                Err(e) => {
-                                    self.message = format!("Error updating transaction: {}", e);
+                                    Err(e) => {
+                                        self.message = format!("Error updating transaction: {}", e);
+                                    }
                                 }
                             }
                         }
