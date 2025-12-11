@@ -5,6 +5,17 @@ use diesel::sqlite::SqliteConnection;
 use diesel::result::{Error, DatabaseErrorKind};
 use crate::models::{Account, Transaction};
 use crate::models::{Budget, Period};
+use crate::finance_calculations::{
+    real_rate,
+    future_value,
+    present_value,
+    present_value_of_dated_cash_flows,
+    future_value_of_dated_cash_flows,
+    price_bond,
+    PaymentFrequency,
+    mortgage_payment_with_frequency,
+    mortgage_amortization_schedule_with_frequency,
+};
 use egui_plot::{Plot, Line, PlotPoints, Text as PlotText};
 use egui::epaint::Shape;
 use std::collections::HashMap;
@@ -34,6 +45,9 @@ pub enum AppState {
     Budgeting,
     Transactions,
     Transfers,
+    CashflowTools,
+    BondTools,
+    MortgageTools,
 }
 
 pub struct FinancerApp {
@@ -88,6 +102,60 @@ pub struct FinancerApp {
     transfer_date: String,
     transfer_filter_start_date: String,
     transfer_filter_end_date: String,
+    // Cash-flow tools state (A/B scenarios, dated entries)
+    cf_a_lines: String,
+    cf_b_lines: String,
+    cf_nominal_rate_percent: f32,
+    cf_inflation_rate_percent: f32,
+    cf_valuation_date: String,
+    cf_horizon_date: String,
+    cf_a_pv: Option<f64>,
+    cf_a_fv: Option<f64>,
+    cf_b_pv: Option<f64>,
+    cf_b_fv: Option<f64>,
+    cf_error: Option<String>,
+    // Helper to quickly add repetitive monthly flows
+    cf_gen_amount: f32,
+    cf_gen_start_date: String,
+    cf_gen_months: i32,
+    // Single-amount PV/FV helper state
+    cf_single_amount: f32,
+    cf_single_years: f32,
+    cf_single_comp_per_year: i32,
+    cf_single_pv: Option<f64>,
+    cf_single_fv: Option<f64>,
+    // Bond tools state (A/B scenarios)
+    bond_a_face_value: f32,
+    bond_a_coupon_percent: f32,
+    bond_a_ytm_percent: f32,
+    bond_a_years_to_maturity: f32,
+    bond_a_payments_per_year: i32,
+    bond_a_price: Option<f64>,
+    bond_a_error: Option<String>,
+    bond_b_face_value: f32,
+    bond_b_coupon_percent: f32,
+    bond_b_ytm_percent: f32,
+    bond_b_years_to_maturity: f32,
+    bond_b_payments_per_year: i32,
+    bond_b_price: Option<f64>,
+    bond_b_error: Option<String>,
+    // Mortgage tools state (A/B scenarios)
+    mort_a_principal: f32,
+    mort_a_annual_rate_percent: f32,
+    mort_a_years: f32,
+    mort_a_monthly_payment: Option<f64>,
+    mort_a_total_paid: Option<f64>,
+    mort_a_total_interest: Option<f64>,
+    mort_a_error: Option<String>,
+    mort_b_principal: f32,
+    mort_b_annual_rate_percent: f32,
+    mort_b_years: f32,
+    mort_b_monthly_payment: Option<f64>,
+    mort_b_total_paid: Option<f64>,
+    mort_b_total_interest: Option<f64>,
+    mort_b_error: Option<String>,
+    mort_a_frequency: PaymentFrequency,
+    mort_b_frequency: PaymentFrequency,
 }
 
 impl FinancerApp {
@@ -144,6 +212,58 @@ impl FinancerApp {
             transfer_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
             transfer_filter_start_date: chrono::Local::now().date_naive().with_day(1).unwrap().format("%Y-%m-%d").to_string(),
             transfer_filter_end_date: chrono::Local::now().date_naive().format("%Y-%m-%d").to_string(),
+            // Cash-flow tools initialization
+            cf_a_lines: String::new(),
+            cf_b_lines: String::new(),
+            cf_nominal_rate_percent: 5.0,
+            cf_inflation_rate_percent: 2.0,
+            cf_valuation_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            cf_horizon_date: String::new(),
+            cf_a_pv: None,
+            cf_a_fv: None,
+            cf_b_pv: None,
+            cf_b_fv: None,
+            cf_error: None,
+            cf_gen_amount: 500.0,
+            cf_gen_start_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            cf_gen_months: 5,
+            cf_single_amount: 1000.0,
+            cf_single_years: 10.0,
+            cf_single_comp_per_year: 1,
+            cf_single_pv: None,
+            cf_single_fv: None,
+            // Bond tools initialization
+            bond_a_face_value: 1000.0,
+            bond_a_coupon_percent: 5.0,
+            bond_a_ytm_percent: 5.0,
+            bond_a_years_to_maturity: 10.0,
+            bond_a_payments_per_year: 2,
+            bond_a_price: None,
+            bond_a_error: None,
+            bond_b_face_value: 1000.0,
+            bond_b_coupon_percent: 5.0,
+            bond_b_ytm_percent: 5.0,
+            bond_b_years_to_maturity: 10.0,
+            bond_b_payments_per_year: 2,
+            bond_b_price: None,
+            bond_b_error: None,
+            // Mortgage tools initialization
+            mort_a_principal: 300_000.0,
+            mort_a_annual_rate_percent: 5.0,
+            mort_a_years: 30.0,
+            mort_a_monthly_payment: None,
+            mort_a_total_paid: None,
+            mort_a_total_interest: None,
+            mort_a_error: None,
+            mort_b_principal: 300_000.0,
+            mort_b_annual_rate_percent: 4.5,
+            mort_b_years: 30.0,
+            mort_b_monthly_payment: None,
+            mort_b_total_paid: None,
+            mort_b_total_interest: None,
+            mort_b_error: None,
+            mort_a_frequency: PaymentFrequency::Monthly,
+            mort_b_frequency: PaymentFrequency::Monthly,
         }
     }
 
@@ -623,6 +743,20 @@ impl FinancerApp {
                 self.screen = AppState::Transfers;
                 self.load_user_transactions();
             }
+
+            ui.separator();
+            ui.heading("Planning Tools");
+            ui.horizontal(|ui| {
+                if ui.button("Cash Flow Tools").clicked() {
+                    self.screen = AppState::CashflowTools;
+                }
+                if ui.button("Bond Tools").clicked() {
+                    self.screen = AppState::BondTools;
+                }
+                if ui.button("Mortgage Tools").clicked() {
+                    self.screen = AppState::MortgageTools;
+                }
+            });
         });
     }
 
@@ -1823,6 +1957,544 @@ impl FinancerApp {
 
 }
 
+impl FinancerApp {
+    fn show_cashflow_tools(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Cash Flow Tools");
+
+            ui.horizontal(|ui| {
+                if ui.button("Back to Dashboard").clicked() {
+                    self.screen = AppState::Dashboard;
+                }
+            });
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Nominal annual interest (%):");
+                ui.add(egui::DragValue::new(&mut self.cf_nominal_rate_percent).speed(0.1));
+                ui.label("Inflation (%):");
+                ui.add(egui::DragValue::new(&mut self.cf_inflation_rate_percent).speed(0.1));
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Valuation date (YYYY-MM-DD):");
+                ui.text_edit_singleline(&mut self.cf_valuation_date);
+                ui.label("Horizon date (optional, YYYY-MM-DD):");
+                ui.text_edit_singleline(&mut self.cf_horizon_date);
+            });
+
+            ui.separator();
+            ui.heading("Single Amount Present/Future Value");
+            ui.horizontal(|ui| {
+                ui.label("Amount today ($):");
+                ui.add(egui::DragValue::new(&mut self.cf_single_amount).speed(10.0));
+                ui.label("Years:");
+                ui.add(egui::DragValue::new(&mut self.cf_single_years).clamp_range(0.0..=100.0).speed(0.5));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Compounding per year:");
+                ui.add(egui::DragValue::new(&mut self.cf_single_comp_per_year).clamp_range(1..=365));
+
+                if ui.button("Compute single PV & FV").clicked() {
+                    let nominal = self.cf_nominal_rate_percent as f64 / 100.0;
+                    let inflation = self.cf_inflation_rate_percent as f64 / 100.0;
+                    let real_annual = real_rate(nominal, inflation);
+
+                    let years = self.cf_single_years.max(0.0) as f64;
+                    let comp_per_year = self.cf_single_comp_per_year.max(1) as u32;
+                    let pv_input = self.cf_single_amount as f64;
+
+                    let fv = future_value(pv_input, real_annual, years, comp_per_year);
+                    let pv_back = present_value(fv, real_annual, years, comp_per_year);
+
+                    self.cf_single_fv = Some(fv);
+                    self.cf_single_pv = Some(pv_back);
+                }
+            });
+
+            if let Some(fv) = self.cf_single_fv {
+                ui.label(format!("Future value of ${:.2} = ${:.2}", self.cf_single_amount, fv));
+            }
+            if let Some(pv) = self.cf_single_pv {
+                ui.label(format!("Check: discounting FV back gives PV ≈ ${:.2}", pv));
+            }
+
+            ui.separator();
+            ui.heading("Quick Monthly Series Generator");
+            ui.horizontal(|ui| {
+                ui.label("Amount per month ($):");
+                ui.add(egui::DragValue::new(&mut self.cf_gen_amount).speed(10.0));
+                ui.label("Start date (YYYY-MM-DD):");
+                ui.text_edit_singleline(&mut self.cf_gen_start_date);
+                ui.label("Months:");
+                ui.add(egui::DragValue::new(&mut self.cf_gen_months).clamp_range(1..=600));
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Add series to Cash Flow A").clicked() {
+                    if let Ok(start) = NaiveDate::parse_from_str(&self.cf_gen_start_date, "%Y-%m-%d") {
+                        for i in 0..self.cf_gen_months.max(0) {
+                            let date = start
+                                .checked_add_months(chrono::Months::new(i as u32))
+                                .unwrap_or(start);
+                            self.cf_a_lines.push_str(&format!("{} {:.2}\n", date.format("%Y-%m-%d"), self.cf_gen_amount));
+                        }
+                    }
+                }
+                if ui.button("Add series to Cash Flow B").clicked() {
+                    if let Ok(start) = NaiveDate::parse_from_str(&self.cf_gen_start_date, "%Y-%m-%d") {
+                        for i in 0..self.cf_gen_months.max(0) {
+                            let date = start
+                                .checked_add_months(chrono::Months::new(i as u32))
+                                .unwrap_or(start);
+                            self.cf_b_lines.push_str(&format!("{} {:.2}\n", date.format("%Y-%m-%d"), self.cf_gen_amount));
+                        }
+                    }
+                }
+            });
+
+            ui.separator();
+
+            ui.columns(2, |cols| {
+                let ui_a = &mut cols[0];
+                ui_a.heading("Cash Flow A");
+                ui_a.label("Enter one cash flow per line: 'YYYY-MM-DD amount'");
+                ui_a.text_edit_multiline(&mut self.cf_a_lines);
+
+                let ui_b = &mut cols[1];
+                ui_b.heading("Cash Flow B");
+                ui_b.label("Enter one cash flow per line: 'YYYY-MM-DD amount'");
+                ui_b.text_edit_multiline(&mut self.cf_b_lines);
+            });
+
+            if ui.button("Compute PV & FV for A and B").clicked() {
+                let parsed_date = NaiveDate::parse_from_str(&self.cf_valuation_date, "%Y-%m-%d");
+                if let Err(_) = parsed_date {
+                    self.cf_error = Some("Invalid valuation date format.".to_string());
+                } else {
+                    let valuation_date = parsed_date.unwrap();
+                    let horizon_date = if self.cf_horizon_date.trim().is_empty() {
+                        None
+                    } else {
+                        NaiveDate::parse_from_str(&self.cf_horizon_date, "%Y-%m-%d").ok()
+                    };
+
+                    let nominal = self.cf_nominal_rate_percent as f64 / 100.0;
+                    let inflation = self.cf_inflation_rate_percent as f64 / 100.0;
+                    let real_annual = real_rate(nominal, inflation);
+
+                    fn parse_lines(lines: &str) -> Result<Vec<(NaiveDate, f64)>, ()> {
+                        let mut out = Vec::new();
+                        for line in lines.lines() {
+                            let trimmed = line.trim();
+                            if trimmed.is_empty() {
+                                continue;
+                            }
+                            let mut parts = trimmed.split_whitespace();
+                            let date_str = parts.next().ok_or(())?;
+                            let amt_str = parts.next().ok_or(())?;
+                            let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_| ())?;
+                            let amount: f64 = amt_str.parse().map_err(|_| ())?;
+                            out.push((date, amount));
+                        }
+                        Ok(out)
+                    }
+
+                    match (parse_lines(&self.cf_a_lines), parse_lines(&self.cf_b_lines)) {
+                        (Ok(a_flows), Ok(b_flows)) => {
+                            if a_flows.is_empty() && b_flows.is_empty() {
+                                self.cf_error = Some("Please enter at least one cash flow in A or B.".to_string());
+                            } else {
+                                let horizon_a = horizon_date
+                                    .or_else(|| a_flows.iter().map(|(d, _)| *d).max())
+                                    .unwrap_or(valuation_date);
+                                let horizon_b = horizon_date
+                                    .or_else(|| b_flows.iter().map(|(d, _)| *d).max())
+                                    .unwrap_or(valuation_date);
+
+                                self.cf_a_pv = if a_flows.is_empty() {
+                                    None
+                                } else {
+                                    Some(present_value_of_dated_cash_flows(&a_flows, valuation_date, real_annual))
+                                };
+                                self.cf_a_fv = if a_flows.is_empty() {
+                                    None
+                                } else {
+                                    Some(future_value_of_dated_cash_flows(&a_flows, horizon_a, real_annual))
+                                };
+
+                                self.cf_b_pv = if b_flows.is_empty() {
+                                    None
+                                } else {
+                                    Some(present_value_of_dated_cash_flows(&b_flows, valuation_date, real_annual))
+                                };
+                                self.cf_b_fv = if b_flows.is_empty() {
+                                    None
+                                } else {
+                                    Some(future_value_of_dated_cash_flows(&b_flows, horizon_b, real_annual))
+                                };
+
+                                self.cf_error = None;
+                            }
+                        }
+                        _ => {
+                            self.cf_error = Some("Could not parse one of the cash flow lists. Use 'YYYY-MM-DD amount'.".to_string());
+                        }
+                    }
+                }
+            }
+
+            if let Some(ref err) = self.cf_error {
+                ui.colored_label(egui::Color32::RED, err);
+            }
+
+            ui.separator();
+            ui.heading("Results and Comparison");
+
+            ui.columns(2, |cols| {
+                let ui_a = &mut cols[0];
+                ui_a.heading("Cash Flow A");
+                if let Some(pv) = self.cf_a_pv {
+                    ui_a.label(format!("Present value: ${:.2}", pv));
+                } else {
+                    ui_a.label("Present value: n/a");
+                }
+                if let Some(fv) = self.cf_a_fv {
+                    ui_a.label(format!("Future value: ${:.2}", fv));
+                } else {
+                    ui_a.label("Future value: n/a");
+                }
+
+                let ui_b = &mut cols[1];
+                ui_b.heading("Cash Flow B");
+                if let Some(pv) = self.cf_b_pv {
+                    ui_b.label(format!("Present value: ${:.2}", pv));
+                } else {
+                    ui_b.label("Present value: n/a");
+                }
+                if let Some(fv) = self.cf_b_fv {
+                    ui_b.label(format!("Future value: ${:.2}", fv));
+                } else {
+                    ui_b.label("Future value: n/a");
+                }
+            });
+
+            if let (Some(pv_a), Some(pv_b)) = (self.cf_a_pv, self.cf_b_pv) {
+                if pv_a > pv_b {
+                    ui.label(format!("Cash Flow A has higher present value by ${:.2}", pv_a - pv_b));
+                } else if pv_b > pv_a {
+                    ui.label(format!("Cash Flow B has higher present value by ${:.2}", pv_b - pv_a));
+                }
+            }
+        });
+    }
+
+    fn show_bond_tools(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Bond Tools");
+
+            ui.horizontal(|ui| {
+                if ui.button("Back to Dashboard").clicked() {
+                    self.screen = AppState::Dashboard;
+                }
+            });
+
+            ui.separator();
+
+            ui.columns(2, |cols| {
+                let ui_a = &mut cols[0];
+                ui_a.heading("Bond A");
+                ui_a.horizontal(|ui| {
+                    ui.label("Face value ($):");
+                    ui.add(egui::DragValue::new(&mut self.bond_a_face_value).speed(10.0));
+                });
+                ui_a.horizontal(|ui| {
+                    ui.label("Coupon rate (%):");
+                    ui.add(egui::DragValue::new(&mut self.bond_a_coupon_percent).speed(0.1));
+                });
+                ui_a.horizontal(|ui| {
+                    ui.label("Yield to maturity (%):");
+                    ui.add(egui::DragValue::new(&mut self.bond_a_ytm_percent).speed(0.1));
+                });
+                ui_a.horizontal(|ui| {
+                    ui.label("Years to maturity:");
+                    ui.add(egui::DragValue::new(&mut self.bond_a_years_to_maturity).speed(0.5));
+                });
+                ui_a.horizontal(|ui| {
+                    ui.label("Payments per year:");
+                    ui.add(egui::DragValue::new(&mut self.bond_a_payments_per_year).clamp_range(1..=12));
+                });
+                if let Some(ref err) = self.bond_a_error {
+                    ui_a.colored_label(egui::Color32::RED, err);
+                }
+                if let Some(price) = self.bond_a_price {
+                    ui_a.label(format!("Price: ${:.2}", price));
+                }
+
+                let ui_b = &mut cols[1];
+                ui_b.heading("Bond B");
+                ui_b.horizontal(|ui| {
+                    ui.label("Face value ($):");
+                    ui.add(egui::DragValue::new(&mut self.bond_b_face_value).speed(10.0));
+                });
+                ui_b.horizontal(|ui| {
+                    ui.label("Coupon rate (%):");
+                    ui.add(egui::DragValue::new(&mut self.bond_b_coupon_percent).speed(0.1));
+                });
+                ui_b.horizontal(|ui| {
+                    ui.label("Yield to maturity (%):");
+                    ui.add(egui::DragValue::new(&mut self.bond_b_ytm_percent).speed(0.1));
+                });
+                ui_b.horizontal(|ui| {
+                    ui.label("Years to maturity:");
+                    ui.add(egui::DragValue::new(&mut self.bond_b_years_to_maturity).speed(0.5));
+                });
+                ui_b.horizontal(|ui| {
+                    ui.label("Payments per year:");
+                    ui.add(egui::DragValue::new(&mut self.bond_b_payments_per_year).clamp_range(1..=12));
+                });
+                if let Some(ref err) = self.bond_b_error {
+                    ui_b.colored_label(egui::Color32::RED, err);
+                }
+                if let Some(price) = self.bond_b_price {
+                    ui_b.label(format!("Price: ${:.2}", price));
+                }
+            });
+
+            if ui.button("Price Both Bonds").clicked() {
+                // Bond A
+                if self.bond_a_face_value <= 0.0 || self.bond_a_years_to_maturity <= 0.0 {
+                    self.bond_a_price = None;
+                    self.bond_a_error = Some("Bond A: Face value and years must be positive.".to_string());
+                } else {
+                    let face = self.bond_a_face_value as f64;
+                    let coupon = self.bond_a_coupon_percent as f64 / 100.0;
+                    let ytm = self.bond_a_ytm_percent as f64 / 100.0;
+                    let years = self.bond_a_years_to_maturity as f64;
+                    let pays = self.bond_a_payments_per_year.max(1) as u32;
+                    self.bond_a_price = Some(price_bond(face, coupon, ytm, years, pays));
+                    self.bond_a_error = None;
+                }
+
+                // Bond B
+                if self.bond_b_face_value <= 0.0 || self.bond_b_years_to_maturity <= 0.0 {
+                    self.bond_b_price = None;
+                    self.bond_b_error = Some("Bond B: Face value and years must be positive.".to_string());
+                } else {
+                    let face = self.bond_b_face_value as f64;
+                    let coupon = self.bond_b_coupon_percent as f64 / 100.0;
+                    let ytm = self.bond_b_ytm_percent as f64 / 100.0;
+                    let years = self.bond_b_years_to_maturity as f64;
+                    let pays = self.bond_b_payments_per_year.max(1) as u32;
+                    self.bond_b_price = Some(price_bond(face, coupon, ytm, years, pays));
+                    self.bond_b_error = None;
+                }
+            }
+
+            ui.separator();
+            ui.heading("Comparison");
+            if let (Some(pa), Some(pb)) = (self.bond_a_price, self.bond_b_price) {
+                if pa > pb {
+                    ui.label(format!("Bond A is more expensive by ${:.2}", pa - pb));
+                } else if pb > pa {
+                    ui.label(format!("Bond B is more expensive by ${:.2}", pb - pa));
+                } else {
+                    ui.label("Both bonds have the same price.");
+                }
+            } else {
+                ui.label("Price both bonds to see a comparison.");
+            }
+        });
+    }
+
+    fn show_mortgage_tools(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Mortgage Tools");
+
+            ui.horizontal(|ui| {
+                if ui.button("Back to Dashboard").clicked() {
+                    self.screen = AppState::Dashboard;
+                }
+            });
+
+            ui.separator();
+
+            ui.columns(2, |cols| {
+                let ui_a = &mut cols[0];
+                ui_a.heading("Mortgage A");
+                ui_a.horizontal(|ui| {
+                    ui.label("Principal ($):");
+                    ui.add(egui::DragValue::new(&mut self.mort_a_principal).speed(1000.0));
+                });
+                ui_a.horizontal(|ui| {
+                    ui.label("Annual rate (%):");
+                    ui.add(egui::DragValue::new(&mut self.mort_a_annual_rate_percent).speed(0.1));
+                });
+                ui_a.horizontal(|ui| {
+                    ui.label("Years:");
+                    ui.add(egui::DragValue::new(&mut self.mort_a_years).speed(1.0));
+                });
+                ui_a.horizontal(|ui| {
+                    ui.label("Payment frequency:");
+                    egui::ComboBox::from_id_source("mort_a_freq")
+                        .selected_text(match self.mort_a_frequency {
+                            PaymentFrequency::Monthly => "Monthly",
+                            PaymentFrequency::BiWeekly => "Bi-weekly",
+                            PaymentFrequency::Weekly => "Weekly",
+                            PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.mort_a_frequency, PaymentFrequency::Monthly, "Monthly");
+                            ui.selectable_value(&mut self.mort_a_frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
+                            ui.selectable_value(&mut self.mort_a_frequency, PaymentFrequency::Weekly, "Weekly");
+                            ui.selectable_value(
+                                &mut self.mort_a_frequency,
+                                PaymentFrequency::AcceleratedWeekly,
+                                "Accelerated weekly",
+                            );
+                        });
+                });
+                if let Some(ref err) = self.mort_a_error {
+                    ui_a.colored_label(egui::Color32::RED, err);
+                }
+                if let Some(p) = self.mort_a_monthly_payment {
+                    ui_a.label(format!("Payment per period: ${:.2}", p));
+                }
+                if let (Some(t), Some(i)) = (self.mort_a_total_paid, self.mort_a_total_interest) {
+                    ui_a.label(format!("Total paid: ${:.2}", t));
+                    ui_a.label(format!("Total interest: ${:.2}", i));
+                }
+
+                let ui_b = &mut cols[1];
+                ui_b.heading("Mortgage B");
+                ui_b.horizontal(|ui| {
+                    ui.label("Principal ($):");
+                    ui.add(egui::DragValue::new(&mut self.mort_b_principal).speed(1000.0));
+                });
+                ui_b.horizontal(|ui| {
+                    ui.label("Annual rate (%):");
+                    ui.add(egui::DragValue::new(&mut self.mort_b_annual_rate_percent).speed(0.1));
+                });
+                ui_b.horizontal(|ui| {
+                    ui.label("Years:");
+                    ui.add(egui::DragValue::new(&mut self.mort_b_years).speed(1.0));
+                });
+                ui_b.horizontal(|ui| {
+                    ui.label("Payment frequency:");
+                    egui::ComboBox::from_id_source("mort_b_freq")
+                        .selected_text(match self.mort_b_frequency {
+                            PaymentFrequency::Monthly => "Monthly",
+                            PaymentFrequency::BiWeekly => "Bi-weekly",
+                            PaymentFrequency::Weekly => "Weekly",
+                            PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.mort_b_frequency, PaymentFrequency::Monthly, "Monthly");
+                            ui.selectable_value(&mut self.mort_b_frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
+                            ui.selectable_value(&mut self.mort_b_frequency, PaymentFrequency::Weekly, "Weekly");
+                            ui.selectable_value(
+                                &mut self.mort_b_frequency,
+                                PaymentFrequency::AcceleratedWeekly,
+                                "Accelerated weekly",
+                            );
+                        });
+                });
+                if let Some(ref err) = self.mort_b_error {
+                    ui_b.colored_label(egui::Color32::RED, err);
+                }
+                if let Some(p) = self.mort_b_monthly_payment {
+                    ui_b.label(format!("Payment per period: ${:.2}", p));
+                }
+                if let (Some(t), Some(i)) = (self.mort_b_total_paid, self.mort_b_total_interest) {
+                    ui_b.label(format!("Total paid: ${:.2}", t));
+                    ui_b.label(format!("Total interest: ${:.2}", i));
+                }
+            });
+
+            if ui.button("Compute Both Mortgages").clicked() {
+                // Mortgage A
+                if self.mort_a_principal <= 0.0 || self.mort_a_years <= 0.0 {
+                    self.mort_a_monthly_payment = None;
+                    self.mort_a_total_paid = None;
+                    self.mort_a_total_interest = None;
+                    self.mort_a_error = Some("Mortgage A: Principal and years must be positive.".to_string());
+                } else {
+                    let principal = self.mort_a_principal as f64;
+                    let annual = self.mort_a_annual_rate_percent as f64 / 100.0;
+                    let years_u32 = self.mort_a_years.round().max(1.0) as u32;
+                    let pmt = mortgage_payment_with_frequency(
+                        principal,
+                        annual,
+                        years_u32,
+                        self.mort_a_frequency,
+                    );
+                    let sched = mortgage_amortization_schedule_with_frequency(
+                        principal,
+                        annual,
+                        years_u32,
+                        self.mort_a_frequency,
+                    );
+                    let total: f64 = sched.iter().map(|p| p.payment).sum();
+                    let interest = total - principal;
+                    self.mort_a_monthly_payment = Some(pmt);
+                    self.mort_a_total_paid = Some(total);
+                    self.mort_a_total_interest = Some(interest);
+                    self.mort_a_error = None;
+                }
+
+                // Mortgage B
+                if self.mort_b_principal <= 0.0 || self.mort_b_years <= 0.0 {
+                    self.mort_b_monthly_payment = None;
+                    self.mort_b_total_paid = None;
+                    self.mort_b_total_interest = None;
+                    self.mort_b_error = Some("Mortgage B: Principal and years must be positive.".to_string());
+                } else {
+                    let principal = self.mort_b_principal as f64;
+                    let annual = self.mort_b_annual_rate_percent as f64 / 100.0;
+                    let years_u32 = self.mort_b_years.round().max(1.0) as u32;
+                    let pmt = mortgage_payment_with_frequency(
+                        principal,
+                        annual,
+                        years_u32,
+                        self.mort_b_frequency,
+                    );
+                    let sched = mortgage_amortization_schedule_with_frequency(
+                        principal,
+                        annual,
+                        years_u32,
+                        self.mort_b_frequency,
+                    );
+                    let total: f64 = sched.iter().map(|p| p.payment).sum();
+                    let interest = total - principal;
+                    self.mort_b_monthly_payment = Some(pmt);
+                    self.mort_b_total_paid = Some(total);
+                    self.mort_b_total_interest = Some(interest);
+                    self.mort_b_error = None;
+                }
+            }
+
+            ui.separator();
+            ui.heading("Comparison");
+            if let (Some(pmt_a), Some(pmt_b)) = (self.mort_a_monthly_payment, self.mort_b_monthly_payment) {
+                if (pmt_a - pmt_b).abs() > f64::EPSILON {
+                    if pmt_a < pmt_b {
+                        ui.label(format!("Mortgage A has a lower payment per period by ${:.2}", pmt_b - pmt_a));
+                    } else {
+                        ui.label(format!("Mortgage B has a lower payment per period by ${:.2}", pmt_a - pmt_b));
+                    }
+                }
+            }
+            if let (Some(int_a), Some(int_b)) = (self.mort_a_total_interest, self.mort_b_total_interest) {
+                if int_a < int_b {
+                    ui.label(format!("Mortgage A pays ${:.2} less interest over the term", int_b - int_a));
+                } else if int_b < int_a {
+                    ui.label(format!("Mortgage B pays ${:.2} less interest over the term", int_a - int_b));
+                }
+            }
+        });
+    }
+}
+
 impl eframe::App for FinancerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         match self.screen {
@@ -1832,6 +2504,9 @@ impl eframe::App for FinancerApp {
             AppState::Budgeting => self.show_budgets(ctx),
             AppState::Transactions => self.show_transactions(ctx),
             AppState::Transfers => self.show_transfers(ctx),
+            AppState::CashflowTools => self.show_cashflow_tools(ctx),
+            AppState::BondTools => self.show_bond_tools(ctx),
+            AppState::MortgageTools => self.show_mortgage_tools(ctx),
         }
     }
 }
