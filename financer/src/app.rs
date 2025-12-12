@@ -2704,60 +2704,62 @@ impl FinancerApp {
                             let col = idx % cols_count;
                             let mut delete_here = false;
                             cols[col].group(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.heading(format!("Mortgage {}", scen.name));
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
-                                            delete_here = true;
-                                        }
+                                ui.push_id(idx, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.heading(format!("Mortgage {}", scen.name));
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                                delete_here = true;
+                                            }
+                                        });
                                     });
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Name:");
-                                    ui.text_edit_singleline(&mut scen.title);
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Principal ($):");
-                                    ui.add(egui::DragValue::new(&mut scen.principal).speed(1000.0));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Annual rate (%):");
-                                    ui.add(egui::DragValue::new(&mut scen.annual_rate_percent).speed(0.1));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Years:");
-                                    ui.add(egui::DragValue::new(&mut scen.years).speed(1.0));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Payment frequency:");
-                                    egui::ComboBox::from_id_source(format!("mort_freq_{}", scen.name))
-                                        .selected_text(match scen.frequency {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Name:");
+                                        ui.text_edit_singleline(&mut scen.title);
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Principal ($):");
+                                        ui.add(egui::DragValue::new(&mut scen.principal).speed(1000.0));
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Annual rate (%):");
+                                        ui.add(egui::DragValue::new(&mut scen.annual_rate_percent).speed(0.1));
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Years:");
+                                        ui.add(egui::DragValue::new(&mut scen.years).speed(1.0));
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Payment frequency:");
+                                        egui::ComboBox::from_id_source(format!("mort_freq_{}_{}", idx, scen.name))
+                                            .selected_text(match scen.frequency {
                                             PaymentFrequency::Monthly => "Monthly",
                                             PaymentFrequency::BiWeekly => "Bi-weekly",
                                             PaymentFrequency::Weekly => "Weekly",
                                             PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
-                                        })
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::Monthly, "Monthly");
-                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
-                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::Weekly, "Weekly");
-                                            ui.selectable_value(
-                                                &mut scen.frequency,
-                                                PaymentFrequency::AcceleratedWeekly,
-                                                "Accelerated weekly",
-                                            );
-                                        });
+                                            })
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(&mut scen.frequency, PaymentFrequency::Monthly, "Monthly");
+                                                ui.selectable_value(&mut scen.frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
+                                                ui.selectable_value(&mut scen.frequency, PaymentFrequency::Weekly, "Weekly");
+                                                ui.selectable_value(
+                                                    &mut scen.frequency,
+                                                    PaymentFrequency::AcceleratedWeekly,
+                                                    "Accelerated weekly",
+                                                );
+                                            });
+                                    });
+                                    if let Some(ref err) = scen.error {
+                                        ui.colored_label(egui::Color32::RED, err);
+                                    }
+                                    if let Some(p) = scen.payment_per_period {
+                                        ui.label(format!("Payment per period: ${:.2}", p));
+                                    }
+                                    if let (Some(t), Some(i)) = (scen.total_paid, scen.total_interest) {
+                                        ui.label(format!("Total paid: ${:.2}", t));
+                                        ui.label(format!("Total interest: ${:.2}", i));
+                                    }
                                 });
-                                if let Some(ref err) = scen.error {
-                                    ui.colored_label(egui::Color32::RED, err);
-                                }
-                                if let Some(p) = scen.payment_per_period {
-                                    ui.label(format!("Payment per period: ${:.2}", p));
-                                }
-                                if let (Some(t), Some(i)) = (scen.total_paid, scen.total_interest) {
-                                    ui.label(format!("Total paid: ${:.2}", t));
-                                    ui.label(format!("Total interest: ${:.2}", i));
-                                }
                             });
                             if delete_here {
                                 to_delete = Some(idx);
