@@ -1,6 +1,7 @@
 /// Financial calculation utilities: present/future value, cash flows, bonds, and mortgages.
 
 use chrono::NaiveDate;
+use serde::{Serialize, Deserialize};
 
 pub fn real_rate(nominal_rate: f64, inflation_rate: f64) -> f64 {
     (1.0 + nominal_rate) / (1.0 + inflation_rate) - 1.0
@@ -95,7 +96,7 @@ pub struct MortgagePayment {
     pub interest: f64,
     pub remaining_balance: f64,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PaymentFrequency {
     Monthly,
     BiWeekly,

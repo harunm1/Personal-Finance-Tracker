@@ -23,6 +23,12 @@ use std::f32::consts::TAU;
 use chrono::{NaiveDateTime,NaiveDate,Datelike};
 use eframe::egui::Color32;
 use csv::Writer;
+use serde::{Serialize, Deserialize};
+use std::fs;
+
+const CASHFLOW_STATE_FILE: &str = "cashflow_state.json";
+const BOND_STATE_FILE: &str = "bond_state.json";
+const MORTGAGE_STATE_FILE: &str = "mortgage_state.json";
 
 const DEFAULT_CATEGORIES: &[&str] = &[
     "Food & Dining",
@@ -48,6 +54,41 @@ pub enum AppState {
     CashflowTools,
     BondTools,
     MortgageTools,
+}
+#[derive(Serialize, Deserialize, Clone)]
+struct CashflowScenario {
+    name: String,
+    title: String,
+    lines: String,
+    pv: Option<f64>,
+    fv: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct BondScenario {
+    name: String,
+    title: String,
+    face_value: f32,
+    coupon_percent: f32,
+    ytm_percent: f32,
+    years_to_maturity: f32,
+    payments_per_year: i32,
+    price: Option<f64>,
+    error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct MortgageScenario {
+    name: String,
+    title: String,
+    principal: f32,
+    annual_rate_percent: f32,
+    years: f32,
+    frequency: PaymentFrequency,
+    payment_per_period: Option<f64>,
+    total_paid: Option<f64>,
+    total_interest: Option<f64>,
+    error: Option<String>,
 }
 
 pub struct FinancerApp {
@@ -102,17 +143,11 @@ pub struct FinancerApp {
     transfer_date: String,
     transfer_filter_start_date: String,
     transfer_filter_end_date: String,
-    // Cash-flow tools state (A/B scenarios, dated entries)
-    cf_a_lines: String,
-    cf_b_lines: String,
+    // Cash-flow tools state (dynamic scenarios, dated entries)
     cf_nominal_rate_percent: f32,
     cf_inflation_rate_percent: f32,
     cf_valuation_date: String,
     cf_horizon_date: String,
-    cf_a_pv: Option<f64>,
-    cf_a_fv: Option<f64>,
-    cf_b_pv: Option<f64>,
-    cf_b_fv: Option<f64>,
     cf_error: Option<String>,
     // Helper to quickly add repetitive monthly flows
     cf_gen_amount: f32,
@@ -124,41 +159,217 @@ pub struct FinancerApp {
     cf_single_comp_per_year: i32,
     cf_single_pv: Option<f64>,
     cf_single_fv: Option<f64>,
-    // Bond tools state (A/B scenarios)
-    bond_a_face_value: f32,
-    bond_a_coupon_percent: f32,
-    bond_a_ytm_percent: f32,
-    bond_a_years_to_maturity: f32,
-    bond_a_payments_per_year: i32,
-    bond_a_price: Option<f64>,
-    bond_a_error: Option<String>,
-    bond_b_face_value: f32,
-    bond_b_coupon_percent: f32,
-    bond_b_ytm_percent: f32,
-    bond_b_years_to_maturity: f32,
-    bond_b_payments_per_year: i32,
-    bond_b_price: Option<f64>,
-    bond_b_error: Option<String>,
-    // Mortgage tools state (A/B scenarios)
-    mort_a_principal: f32,
-    mort_a_annual_rate_percent: f32,
-    mort_a_years: f32,
-    mort_a_monthly_payment: Option<f64>,
-    mort_a_total_paid: Option<f64>,
-    mort_a_total_interest: Option<f64>,
-    mort_a_error: Option<String>,
-    mort_b_principal: f32,
-    mort_b_annual_rate_percent: f32,
-    mort_b_years: f32,
-    mort_b_monthly_payment: Option<f64>,
-    mort_b_total_paid: Option<f64>,
-    mort_b_total_interest: Option<f64>,
-    mort_b_error: Option<String>,
-    mort_a_frequency: PaymentFrequency,
-    mort_b_frequency: PaymentFrequency,
+    cf_scenarios: Vec<CashflowScenario>,
+    cf_selected_scenario_for_gen: usize,
+    cf_state_file: String,
+    // Bond tools state (dynamic scenarios)
+    bond_scenarios: Vec<BondScenario>,
+    bond_state_file: String,
+    // Mortgage tools state (dynamic scenarios)
+    mortgage_scenarios: Vec<MortgageScenario>,
+    mortgage_state_file: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CashflowToolState {
+    nominal_rate_percent: f32,
+    inflation_rate_percent: f32,
+    valuation_date: String,
+    horizon_date: String,
+    gen_amount: f32,
+    gen_start_date: String,
+    gen_months: i32,
+    single_amount: f32,
+    single_years: f32,
+    single_comp_per_year: i32,
+    scenarios: Vec<CashflowScenario>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct BondToolState {
+    scenarios: Vec<BondScenario>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MortgageToolState {
+    scenarios: Vec<MortgageScenario>,
 }
 
 impl FinancerApp {
+    fn next_scenario_label(existing_len: usize) -> String {
+        if existing_len < 26 {
+            ((b'A' + existing_len as u8) as char).to_string()
+        } else {
+            format!("S{}", existing_len + 1)
+        }
+    }
+
+    fn save_cashflow_state(&mut self) {
+        let filename = if self.cf_state_file.trim().is_empty() {
+            CASHFLOW_STATE_FILE.to_string()
+        } else {
+            self.cf_state_file.trim().to_string()
+        };
+
+        let state = CashflowToolState {
+            nominal_rate_percent: self.cf_nominal_rate_percent,
+            inflation_rate_percent: self.cf_inflation_rate_percent,
+            valuation_date: self.cf_valuation_date.clone(),
+            horizon_date: self.cf_horizon_date.clone(),
+            gen_amount: self.cf_gen_amount,
+            gen_start_date: self.cf_gen_start_date.clone(),
+            gen_months: self.cf_gen_months,
+            single_amount: self.cf_single_amount,
+            single_years: self.cf_single_years,
+            single_comp_per_year: self.cf_single_comp_per_year,
+            scenarios: self.cf_scenarios.clone(),
+        };
+
+        match serde_json::to_string_pretty(&state) {
+            Ok(json) => {
+                if let Err(e) = fs::write(&filename, json) {
+                    self.cf_error = Some(format!("Failed to save cashflow state to {}: {}", filename, e));
+                } else {
+                    self.message = format!("Cashflow tools saved to {}.", filename);
+                }
+            }
+            Err(e) => {
+                self.cf_error = Some(format!("Failed to serialize cashflow state: {}", e));
+            }
+        }
+    }
+
+    fn load_cashflow_state(&mut self) {
+        let filename = if self.cf_state_file.trim().is_empty() {
+            CASHFLOW_STATE_FILE.to_string()
+        } else {
+            self.cf_state_file.trim().to_string()
+        };
+
+        match fs::read_to_string(&filename) {
+            Ok(contents) => match serde_json::from_str::<CashflowToolState>(&contents) {
+                Ok(state) => {
+                    self.cf_nominal_rate_percent = state.nominal_rate_percent;
+                    self.cf_inflation_rate_percent = state.inflation_rate_percent;
+                    self.cf_valuation_date = state.valuation_date;
+                    self.cf_horizon_date = state.horizon_date;
+                    self.cf_gen_amount = state.gen_amount;
+                    self.cf_gen_start_date = state.gen_start_date;
+                    self.cf_gen_months = state.gen_months;
+                    self.cf_single_amount = state.single_amount;
+                    self.cf_single_years = state.single_years;
+                    self.cf_single_comp_per_year = state.single_comp_per_year;
+                    self.cf_scenarios = state.scenarios;
+                    self.cf_selected_scenario_for_gen = 0;
+                    self.cf_error = None;
+                    self.message = format!("Cashflow tools loaded from {}.", filename);
+                }
+                Err(e) => {
+                    self.cf_error = Some(format!("Failed to parse cashflow state: {}", e));
+                }
+            },
+            Err(e) => {
+                self.cf_error = Some(format!("Failed to read {}: {}", filename, e));
+            }
+        }
+    }
+
+    fn save_bond_state(&mut self) {
+        let filename = if self.bond_state_file.trim().is_empty() {
+            BOND_STATE_FILE.to_string()
+        } else {
+            self.bond_state_file.trim().to_string()
+        };
+
+        let state = BondToolState {
+            scenarios: self.bond_scenarios.clone(),
+        };
+
+        match serde_json::to_string_pretty(&state) {
+            Ok(json) => {
+                if let Err(e) = fs::write(&filename, json) {
+                    self.message = format!("Failed to save bond state to {}: {}", filename, e);
+                } else {
+                    self.message = format!("Bond tools saved to {}.", filename);
+                }
+            }
+            Err(e) => {
+                self.message = format!("Failed to serialize bond state: {}", e);
+            }
+        }
+    }
+
+    fn load_bond_state(&mut self) {
+        let filename = if self.bond_state_file.trim().is_empty() {
+            BOND_STATE_FILE.to_string()
+        } else {
+            self.bond_state_file.trim().to_string()
+        };
+
+        match fs::read_to_string(&filename) {
+            Ok(contents) => match serde_json::from_str::<BondToolState>(&contents) {
+                Ok(state) => {
+                    self.bond_scenarios = state.scenarios;
+                    self.message = format!("Bond tools loaded from {}.", filename);
+                }
+                Err(e) => {
+                    self.message = format!("Failed to parse bond state: {}", e);
+                }
+            },
+            Err(e) => {
+                self.message = format!("Failed to read {}: {}", filename, e);
+            }
+        }
+    }
+
+    fn save_mortgage_state(&mut self) {
+        let filename = if self.mortgage_state_file.trim().is_empty() {
+            MORTGAGE_STATE_FILE.to_string()
+        } else {
+            self.mortgage_state_file.trim().to_string()
+        };
+
+        let state = MortgageToolState {
+            scenarios: self.mortgage_scenarios.clone(),
+        };
+
+        match serde_json::to_string_pretty(&state) {
+            Ok(json) => {
+                if let Err(e) = fs::write(&filename, json) {
+                    self.message = format!("Failed to save mortgage state to {}: {}", filename, e);
+                } else {
+                    self.message = format!("Mortgage tools saved to {}.", filename);
+                }
+            }
+            Err(e) => {
+                self.message = format!("Failed to serialize mortgage state: {}", e);
+            }
+        }
+    }
+
+    fn load_mortgage_state(&mut self) {
+        let filename = if self.mortgage_state_file.trim().is_empty() {
+            MORTGAGE_STATE_FILE.to_string()
+        } else {
+            self.mortgage_state_file.trim().to_string()
+        };
+
+        match fs::read_to_string(&filename) {
+            Ok(contents) => match serde_json::from_str::<MortgageToolState>(&contents) {
+                Ok(state) => {
+                    self.mortgage_scenarios = state.scenarios;
+                    self.message = format!("Mortgage tools loaded from {}.", filename);
+                }
+                Err(e) => {
+                    self.message = format!("Failed to parse mortgage state: {}", e);
+                }
+            },
+            Err(e) => {
+                self.message = format!("Failed to read {}: {}", filename, e);
+            }
+        }
+    }
+
     pub fn new(conn: SqliteConnection) -> Self {
         Self {
             username: String::new(),
@@ -213,16 +424,10 @@ impl FinancerApp {
             transfer_filter_start_date: chrono::Local::now().date_naive().with_day(1).unwrap().format("%Y-%m-%d").to_string(),
             transfer_filter_end_date: chrono::Local::now().date_naive().format("%Y-%m-%d").to_string(),
             // Cash-flow tools initialization
-            cf_a_lines: String::new(),
-            cf_b_lines: String::new(),
             cf_nominal_rate_percent: 5.0,
             cf_inflation_rate_percent: 2.0,
             cf_valuation_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
             cf_horizon_date: String::new(),
-            cf_a_pv: None,
-            cf_a_fv: None,
-            cf_b_pv: None,
-            cf_b_fv: None,
             cf_error: None,
             cf_gen_amount: 500.0,
             cf_gen_start_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
@@ -232,38 +437,42 @@ impl FinancerApp {
             cf_single_comp_per_year: 1,
             cf_single_pv: None,
             cf_single_fv: None,
-            // Bond tools initialization
-            bond_a_face_value: 1000.0,
-            bond_a_coupon_percent: 5.0,
-            bond_a_ytm_percent: 5.0,
-            bond_a_years_to_maturity: 10.0,
-            bond_a_payments_per_year: 2,
-            bond_a_price: None,
-            bond_a_error: None,
-            bond_b_face_value: 1000.0,
-            bond_b_coupon_percent: 5.0,
-            bond_b_ytm_percent: 5.0,
-            bond_b_years_to_maturity: 10.0,
-            bond_b_payments_per_year: 2,
-            bond_b_price: None,
-            bond_b_error: None,
-            // Mortgage tools initialization
-            mort_a_principal: 300_000.0,
-            mort_a_annual_rate_percent: 5.0,
-            mort_a_years: 30.0,
-            mort_a_monthly_payment: None,
-            mort_a_total_paid: None,
-            mort_a_total_interest: None,
-            mort_a_error: None,
-            mort_b_principal: 300_000.0,
-            mort_b_annual_rate_percent: 4.5,
-            mort_b_years: 30.0,
-            mort_b_monthly_payment: None,
-            mort_b_total_paid: None,
-            mort_b_total_interest: None,
-            mort_b_error: None,
-            mort_a_frequency: PaymentFrequency::Monthly,
-            mort_b_frequency: PaymentFrequency::Monthly,
+            cf_scenarios: vec![CashflowScenario {
+                name: "A".to_string(),
+                title: String::new(),
+                lines: String::new(),
+                pv: None,
+                fv: None,
+            }],
+            cf_selected_scenario_for_gen: 0,
+            cf_state_file: CASHFLOW_STATE_FILE.to_string(),
+            // Bond tools initialization (single default scenario A)
+            bond_scenarios: vec![BondScenario {
+                name: "A".to_string(),
+                title: String::new(),
+                face_value: 1000.0,
+                coupon_percent: 5.0,
+                ytm_percent: 5.0,
+                years_to_maturity: 10.0,
+                payments_per_year: 2,
+                price: None,
+                error: None,
+            }],
+            bond_state_file: BOND_STATE_FILE.to_string(),
+            // Mortgage tools initialization (single default scenario A)
+            mortgage_scenarios: vec![MortgageScenario {
+                name: "A".to_string(),
+                title: String::new(),
+                principal: 300_000.0,
+                annual_rate_percent: 5.0,
+                years: 30.0,
+                frequency: PaymentFrequency::Monthly,
+                payment_per_period: None,
+                total_paid: None,
+                total_interest: None,
+                error: None,
+            }],
+            mortgage_state_file: MORTGAGE_STATE_FILE.to_string(),
         }
     }
 
@@ -747,14 +956,14 @@ impl FinancerApp {
             ui.separator();
             ui.heading("Planning Tools");
             ui.horizontal(|ui| {
-                if ui.button("Cash Flow Tools").clicked() {
-                    self.screen = AppState::CashflowTools;
-                }
                 if ui.button("Bond Tools").clicked() {
                     self.screen = AppState::BondTools;
                 }
                 if ui.button("Mortgage Tools").clicked() {
                     self.screen = AppState::MortgageTools;
+                }
+                if ui.button("Cash Flow Tools").clicked() {
+                    self.screen = AppState::CashflowTools;
                 }
             });
         });
@@ -1971,6 +2180,33 @@ impl FinancerApp {
             ui.separator();
 
             ui.horizontal(|ui| {
+                ui.label("File:");
+                ui.text_edit_singleline(&mut self.cf_state_file);
+                if ui.button("Save").clicked() {
+                    self.save_cashflow_state();
+                }
+                if ui.button("Load").clicked() {
+                    self.load_cashflow_state();
+                }
+            });
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.heading("Scenarios");
+                if ui.button("Add Scenario").clicked() {
+                    let label = FinancerApp::next_scenario_label(self.cf_scenarios.len());
+                    self.cf_scenarios.push(CashflowScenario {
+                        name: label,
+                        title: String::new(),
+                        lines: String::new(),
+                        pv: None,
+                        fv: None,
+                    });
+                }
+            });
+
+            ui.horizontal(|ui| {
                 ui.label("Nominal annual interest (%):");
                 ui.add(egui::DragValue::new(&mut self.cf_nominal_rate_percent).speed(0.1));
                 ui.label("Inflation (%):");
@@ -2031,23 +2267,41 @@ impl FinancerApp {
                 ui.add(egui::DragValue::new(&mut self.cf_gen_months).clamp_range(1..=600));
             });
             ui.horizontal(|ui| {
-                if ui.button("Add series to Cash Flow A").clicked() {
-                    if let Ok(start) = NaiveDate::parse_from_str(&self.cf_gen_start_date, "%Y-%m-%d") {
-                        for i in 0..self.cf_gen_months.max(0) {
-                            let date = start
-                                .checked_add_months(chrono::Months::new(i as u32))
-                                .unwrap_or(start);
-                            self.cf_a_lines.push_str(&format!("{} {:.2}\n", date.format("%Y-%m-%d"), self.cf_gen_amount));
-                        }
+                ui.label("Target scenario:");
+                if !self.cf_scenarios.is_empty() {
+                    if self.cf_selected_scenario_for_gen >= self.cf_scenarios.len() {
+                        self.cf_selected_scenario_for_gen = self.cf_scenarios.len() - 1;
                     }
+                    let current_name = &self.cf_scenarios[self.cf_selected_scenario_for_gen].name;
+                    egui::ComboBox::from_id_source("cf_gen_target_scenario")
+                        .selected_text(format!("Scenario {}", current_name))
+                        .show_ui(ui, |ui| {
+                            for (idx, scen) in self.cf_scenarios.iter().enumerate() {
+                                ui.selectable_value(
+                                    &mut self.cf_selected_scenario_for_gen,
+                                    idx,
+                                    format!("Scenario {}", scen.name),
+                                );
+                            }
+                        });
+                } else {
+                    ui.label("No scenarios available.");
                 }
-                if ui.button("Add series to Cash Flow B").clicked() {
+
+                if ui.button("Add series to selected").clicked() {
                     if let Ok(start) = NaiveDate::parse_from_str(&self.cf_gen_start_date, "%Y-%m-%d") {
-                        for i in 0..self.cf_gen_months.max(0) {
-                            let date = start
-                                .checked_add_months(chrono::Months::new(i as u32))
-                                .unwrap_or(start);
-                            self.cf_b_lines.push_str(&format!("{} {:.2}\n", date.format("%Y-%m-%d"), self.cf_gen_amount));
+                        if !self.cf_scenarios.is_empty() {
+                            if self.cf_selected_scenario_for_gen >= self.cf_scenarios.len() {
+                                self.cf_selected_scenario_for_gen = self.cf_scenarios.len() - 1;
+                            }
+                            let scen_index = self.cf_selected_scenario_for_gen;
+                            let scen = &mut self.cf_scenarios[scen_index];
+                            for i in 0..self.cf_gen_months.max(0) {
+                                let date = start
+                                    .checked_add_months(chrono::Months::new(i as u32))
+                                    .unwrap_or(start);
+                                scen.lines.push_str(&format!("{} {:.2}\n", date.format("%Y-%m-%d"), self.cf_gen_amount));
+                            }
                         }
                     }
                 }
@@ -2055,19 +2309,51 @@ impl FinancerApp {
 
             ui.separator();
 
-            ui.columns(2, |cols| {
-                let ui_a = &mut cols[0];
-                ui_a.heading("Cash Flow A");
-                ui_a.label("Enter one cash flow per line: 'YYYY-MM-DD amount'");
-                ui_a.text_edit_multiline(&mut self.cf_a_lines);
+            ui.heading("Cash Flow Scenarios");
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let count = self.cf_scenarios.len();
+                if count == 0 {
+                    ui.label("No scenarios defined.");
+                    return;
+                }
 
-                let ui_b = &mut cols[1];
-                ui_b.heading("Cash Flow B");
-                ui_b.label("Enter one cash flow per line: 'YYYY-MM-DD amount'");
-                ui_b.text_edit_multiline(&mut self.cf_b_lines);
+                let cols_count = count.min(3);
+                let can_delete = count > 1;
+                let mut to_delete: Option<usize> = None;
+                ui.columns(cols_count, |cols| {
+                    for (idx, scen) in self.cf_scenarios.iter_mut().enumerate() {
+                        let col = idx % cols_count;
+                        let mut delete_here = false;
+                        cols[col].group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.heading(format!("Scenario {}", scen.name));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                        delete_here = true;
+                                    }
+                                });
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Name:");
+                                ui.text_edit_singleline(&mut scen.title);
+                            });
+                            ui.label("Enter one cash flow per line: 'YYYY-MM-DD amount'");
+                            ui.text_edit_multiline(&mut scen.lines);
+                        });
+                        if delete_here {
+                            to_delete = Some(idx);
+                        }
+                    }
+                });
+
+                if let Some(idx) = to_delete {
+                    if self.cf_scenarios.len() > 1 {
+                        self.cf_scenarios.remove(idx);
+                    }
+                }
             });
 
-            if ui.button("Compute PV & FV for A and B").clicked() {
+            if ui.button("Compute PV & FV for all scenarios").clicked() {
                 let parsed_date = NaiveDate::parse_from_str(&self.cf_valuation_date, "%Y-%m-%d");
                 if let Err(_) = parsed_date {
                     self.cf_error = Some("Invalid valuation date format.".to_string());
@@ -2100,46 +2386,54 @@ impl FinancerApp {
                         Ok(out)
                     }
 
-                    match (parse_lines(&self.cf_a_lines), parse_lines(&self.cf_b_lines)) {
-                        (Ok(a_flows), Ok(b_flows)) => {
-                            if a_flows.is_empty() && b_flows.is_empty() {
-                                self.cf_error = Some("Please enter at least one cash flow in A or B.".to_string());
-                            } else {
-                                let horizon_a = horizon_date
-                                    .or_else(|| a_flows.iter().map(|(d, _)| *d).max())
+                    let mut any_nonempty = false;
+
+                    for scen in &mut self.cf_scenarios {
+                        if scen.lines.trim().is_empty() {
+                            scen.pv = None;
+                            scen.fv = None;
+                            continue;
+                        }
+
+                        match parse_lines(&scen.lines) {
+                            Ok(flows) => {
+                                if flows.is_empty() {
+                                    scen.pv = None;
+                                    scen.fv = None;
+                                    continue;
+                                }
+
+                                any_nonempty = true;
+
+                                let horizon = horizon_date
+                                    .or_else(|| flows.iter().map(|(d, _)| *d).max())
                                     .unwrap_or(valuation_date);
-                                let horizon_b = horizon_date
-                                    .or_else(|| b_flows.iter().map(|(d, _)| *d).max())
-                                    .unwrap_or(valuation_date);
 
-                                self.cf_a_pv = if a_flows.is_empty() {
-                                    None
-                                } else {
-                                    Some(present_value_of_dated_cash_flows(&a_flows, valuation_date, real_annual))
-                                };
-                                self.cf_a_fv = if a_flows.is_empty() {
-                                    None
-                                } else {
-                                    Some(future_value_of_dated_cash_flows(&a_flows, horizon_a, real_annual))
-                                };
-
-                                self.cf_b_pv = if b_flows.is_empty() {
-                                    None
-                                } else {
-                                    Some(present_value_of_dated_cash_flows(&b_flows, valuation_date, real_annual))
-                                };
-                                self.cf_b_fv = if b_flows.is_empty() {
-                                    None
-                                } else {
-                                    Some(future_value_of_dated_cash_flows(&b_flows, horizon_b, real_annual))
-                                };
-
-                                self.cf_error = None;
+                                scen.pv = Some(present_value_of_dated_cash_flows(
+                                    &flows,
+                                    valuation_date,
+                                    real_annual,
+                                ));
+                                scen.fv = Some(future_value_of_dated_cash_flows(
+                                    &flows,
+                                    horizon,
+                                    real_annual,
+                                ));
+                            }
+                            Err(_) => {
+                                self.cf_error = Some(format!(
+                                    "Could not parse cash flows for scenario {}. Use 'YYYY-MM-DD amount'.",
+                                    scen.name
+                                ));
+                                return;
                             }
                         }
-                        _ => {
-                            self.cf_error = Some("Could not parse one of the cash flow lists. Use 'YYYY-MM-DD amount'.".to_string());
-                        }
+                    }
+
+                    if any_nonempty {
+                        self.cf_error = None;
+                    } else {
+                        self.cf_error = Some("Please enter at least one cash flow in a scenario.".to_string());
                     }
                 }
             }
@@ -2151,39 +2445,51 @@ impl FinancerApp {
             ui.separator();
             ui.heading("Results and Comparison");
 
-            ui.columns(2, |cols| {
-                let ui_a = &mut cols[0];
-                ui_a.heading("Cash Flow A");
-                if let Some(pv) = self.cf_a_pv {
-                    ui_a.label(format!("Present value: ${:.2}", pv));
-                } else {
-                    ui_a.label("Present value: n/a");
-                }
-                if let Some(fv) = self.cf_a_fv {
-                    ui_a.label(format!("Future value: ${:.2}", fv));
-                } else {
-                    ui_a.label("Future value: n/a");
-                }
+            if self.cf_scenarios.is_empty() {
+                ui.label("No scenarios defined.");
+            } else {
+                egui::Grid::new("cf_results_grid").striped(true).show(ui, |ui| {
+                    ui.label("Scenario");
+                    ui.label("Present value");
+                    ui.label("Future value");
+                    ui.end_row();
 
-                let ui_b = &mut cols[1];
-                ui_b.heading("Cash Flow B");
-                if let Some(pv) = self.cf_b_pv {
-                    ui_b.label(format!("Present value: ${:.2}", pv));
-                } else {
-                    ui_b.label("Present value: n/a");
-                }
-                if let Some(fv) = self.cf_b_fv {
-                    ui_b.label(format!("Future value: ${:.2}", fv));
-                } else {
-                    ui_b.label("Future value: n/a");
-                }
-            });
+                    for scen in &self.cf_scenarios {
+                        let display_name = if scen.title.is_empty() {
+                            scen.name.clone()
+                        } else {
+                            format!("{} ({})", scen.name, scen.title)
+                        };
+                        ui.label(display_name);
+                        if let Some(pv) = scen.pv {
+                            ui.label(format!("${:.2}", pv));
+                        } else {
+                            ui.label("n/a");
+                        }
+                        if let Some(fv) = scen.fv {
+                            ui.label(format!("${:.2}", fv));
+                        } else {
+                            ui.label("n/a");
+                        }
+                        ui.end_row();
+                    }
+                });
 
-            if let (Some(pv_a), Some(pv_b)) = (self.cf_a_pv, self.cf_b_pv) {
-                if pv_a > pv_b {
-                    ui.label(format!("Cash Flow A has higher present value by ${:.2}", pv_a - pv_b));
-                } else if pv_b > pv_a {
-                    ui.label(format!("Cash Flow B has higher present value by ${:.2}", pv_b - pv_a));
+                if let Some((best_name, best_title, best_pv)) = self
+                    .cf_scenarios
+                    .iter()
+                    .filter_map(|s| s.pv.map(|pv| (s.name.clone(), s.title.clone(), pv)))
+                    .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                {
+                    let label = if best_title.is_empty() {
+                        best_name.clone()
+                    } else {
+                        format!("{} ({})", best_name, best_title)
+                    };
+                    ui.label(format!(
+                        "Scenario {} has the highest present value: ${:.2}",
+                        label, best_pv
+                    ));
                 }
             }
         });
@@ -2201,108 +2507,141 @@ impl FinancerApp {
 
             ui.separator();
 
-            ui.columns(2, |cols| {
-                let ui_a = &mut cols[0];
-                ui_a.heading("Bond A");
-                ui_a.horizontal(|ui| {
-                    ui.label("Face value ($):");
-                    ui.add(egui::DragValue::new(&mut self.bond_a_face_value).speed(10.0));
-                });
-                ui_a.horizontal(|ui| {
-                    ui.label("Coupon rate (%):");
-                    ui.add(egui::DragValue::new(&mut self.bond_a_coupon_percent).speed(0.1));
-                });
-                ui_a.horizontal(|ui| {
-                    ui.label("Yield to maturity (%):");
-                    ui.add(egui::DragValue::new(&mut self.bond_a_ytm_percent).speed(0.1));
-                });
-                ui_a.horizontal(|ui| {
-                    ui.label("Years to maturity:");
-                    ui.add(egui::DragValue::new(&mut self.bond_a_years_to_maturity).speed(0.5));
-                });
-                ui_a.horizontal(|ui| {
-                    ui.label("Payments per year:");
-                    ui.add(egui::DragValue::new(&mut self.bond_a_payments_per_year).clamp_range(1..=12));
-                });
-                if let Some(ref err) = self.bond_a_error {
-                    ui_a.colored_label(egui::Color32::RED, err);
+            ui.horizontal(|ui| {
+                ui.label("File:");
+                ui.text_edit_singleline(&mut self.bond_state_file);
+                if ui.button("Save").clicked() {
+                    self.save_bond_state();
                 }
-                if let Some(price) = self.bond_a_price {
-                    ui_a.label(format!("Price: ${:.2}", price));
-                }
-
-                let ui_b = &mut cols[1];
-                ui_b.heading("Bond B");
-                ui_b.horizontal(|ui| {
-                    ui.label("Face value ($):");
-                    ui.add(egui::DragValue::new(&mut self.bond_b_face_value).speed(10.0));
-                });
-                ui_b.horizontal(|ui| {
-                    ui.label("Coupon rate (%):");
-                    ui.add(egui::DragValue::new(&mut self.bond_b_coupon_percent).speed(0.1));
-                });
-                ui_b.horizontal(|ui| {
-                    ui.label("Yield to maturity (%):");
-                    ui.add(egui::DragValue::new(&mut self.bond_b_ytm_percent).speed(0.1));
-                });
-                ui_b.horizontal(|ui| {
-                    ui.label("Years to maturity:");
-                    ui.add(egui::DragValue::new(&mut self.bond_b_years_to_maturity).speed(0.5));
-                });
-                ui_b.horizontal(|ui| {
-                    ui.label("Payments per year:");
-                    ui.add(egui::DragValue::new(&mut self.bond_b_payments_per_year).clamp_range(1..=12));
-                });
-                if let Some(ref err) = self.bond_b_error {
-                    ui_b.colored_label(egui::Color32::RED, err);
-                }
-                if let Some(price) = self.bond_b_price {
-                    ui_b.label(format!("Price: ${:.2}", price));
+                if ui.button("Load").clicked() {
+                    self.load_bond_state();
                 }
             });
 
-            if ui.button("Price Both Bonds").clicked() {
-                // Bond A
-                if self.bond_a_face_value <= 0.0 || self.bond_a_years_to_maturity <= 0.0 {
-                    self.bond_a_price = None;
-                    self.bond_a_error = Some("Bond A: Face value and years must be positive.".to_string());
-                } else {
-                    let face = self.bond_a_face_value as f64;
-                    let coupon = self.bond_a_coupon_percent as f64 / 100.0;
-                    let ytm = self.bond_a_ytm_percent as f64 / 100.0;
-                    let years = self.bond_a_years_to_maturity as f64;
-                    let pays = self.bond_a_payments_per_year.max(1) as u32;
-                    self.bond_a_price = Some(price_bond(face, coupon, ytm, years, pays));
-                    self.bond_a_error = None;
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.heading("Bond Scenarios");
+                if ui.button("Add Bond Scenario").clicked() {
+                    let label = FinancerApp::next_scenario_label(self.bond_scenarios.len());
+                    self.bond_scenarios.push(BondScenario {
+                        name: label,
+                        title: String::new(),
+                        face_value: 1000.0,
+                        coupon_percent: 5.0,
+                        ytm_percent: 5.0,
+                        years_to_maturity: 10.0,
+                        payments_per_year: 2,
+                        price: None,
+                        error: None,
+                    });
                 }
+            });
 
-                // Bond B
-                if self.bond_b_face_value <= 0.0 || self.bond_b_years_to_maturity <= 0.0 {
-                    self.bond_b_price = None;
-                    self.bond_b_error = Some("Bond B: Face value and years must be positive.".to_string());
-                } else {
-                    let face = self.bond_b_face_value as f64;
-                    let coupon = self.bond_b_coupon_percent as f64 / 100.0;
-                    let ytm = self.bond_b_ytm_percent as f64 / 100.0;
-                    let years = self.bond_b_years_to_maturity as f64;
-                    let pays = self.bond_b_payments_per_year.max(1) as u32;
-                    self.bond_b_price = Some(price_bond(face, coupon, ytm, years, pays));
-                    self.bond_b_error = None;
+            ui.separator();
+
+            if self.bond_scenarios.is_empty() {
+                ui.label("No bond scenarios defined.");
+            } else {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let count = self.bond_scenarios.len();
+                    let cols_count = count.min(3);
+                    let can_delete = count > 1;
+                    let mut to_delete: Option<usize> = None;
+                    ui.columns(cols_count, |cols| {
+                        for (idx, scen) in self.bond_scenarios.iter_mut().enumerate() {
+                            let col = idx % cols_count;
+                            let mut delete_here = false;
+                            cols[col].group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.heading(format!("Bond {}", scen.name));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                            delete_here = true;
+                                        }
+                                    });
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Name:");
+                                    ui.text_edit_singleline(&mut scen.title);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Face value ($):");
+                                    ui.add(egui::DragValue::new(&mut scen.face_value).speed(10.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Coupon rate (%):");
+                                    ui.add(egui::DragValue::new(&mut scen.coupon_percent).speed(0.1));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Yield to maturity (%):");
+                                    ui.add(egui::DragValue::new(&mut scen.ytm_percent).speed(0.1));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Years to maturity:");
+                                    ui.add(egui::DragValue::new(&mut scen.years_to_maturity).speed(0.5));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Payments per year:");
+                                    ui.add(egui::DragValue::new(&mut scen.payments_per_year).clamp_range(1..=12));
+                                });
+                                if let Some(ref err) = scen.error {
+                                    ui.colored_label(egui::Color32::RED, err);
+                                }
+                                if let Some(price) = scen.price {
+                                    ui.label(format!("Price: ${:.2}", price));
+                                }
+                            });
+                            if delete_here {
+                                to_delete = Some(idx);
+                            }
+                        }
+                    });
+
+                    if let Some(idx) = to_delete {
+                        if self.bond_scenarios.len() > 1 {
+                            self.bond_scenarios.remove(idx);
+                        }
+                    }
+                });
+            }
+
+            if ui.button("Price All Bonds").clicked() {
+                for scen in &mut self.bond_scenarios {
+                    if scen.face_value <= 0.0 || scen.years_to_maturity <= 0.0 {
+                        scen.price = None;
+                        scen.error = Some(format!(
+                            "Bond {}: Face value and years must be positive.",
+                            scen.name
+                        ));
+                    } else {
+                        let face = scen.face_value as f64;
+                        let coupon = scen.coupon_percent as f64 / 100.0;
+                        let ytm = scen.ytm_percent as f64 / 100.0;
+                        let years = scen.years_to_maturity as f64;
+                        let pays = scen.payments_per_year.max(1) as u32;
+                        scen.price = Some(price_bond(face, coupon, ytm, years, pays));
+                        scen.error = None;
+                    }
                 }
             }
 
             ui.separator();
             ui.heading("Comparison");
-            if let (Some(pa), Some(pb)) = (self.bond_a_price, self.bond_b_price) {
-                if pa > pb {
-                    ui.label(format!("Bond A is more expensive by ${:.2}", pa - pb));
-                } else if pb > pa {
-                    ui.label(format!("Bond B is more expensive by ${:.2}", pb - pa));
+
+            if let Some((name, title, price)) = self
+                .bond_scenarios
+                .iter()
+                .filter_map(|s| s.price.map(|p| (s.name.clone(), s.title.clone(), p)))
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            {
+                let label = if title.is_empty() {
+                    name.clone()
                 } else {
-                    ui.label("Both bonds have the same price.");
-                }
+                    format!("{} ({})", name, title)
+                };
+                ui.label(format!("Bond {} has the highest price at ${:.2}", label, price));
             } else {
-                ui.label("Price both bonds to see a comparison.");
+                ui.label("Price bond scenarios to see a comparison.");
             }
         });
     }
@@ -2319,177 +2658,192 @@ impl FinancerApp {
 
             ui.separator();
 
-            ui.columns(2, |cols| {
-                let ui_a = &mut cols[0];
-                ui_a.heading("Mortgage A");
-                ui_a.horizontal(|ui| {
-                    ui.label("Principal ($):");
-                    ui.add(egui::DragValue::new(&mut self.mort_a_principal).speed(1000.0));
-                });
-                ui_a.horizontal(|ui| {
-                    ui.label("Annual rate (%):");
-                    ui.add(egui::DragValue::new(&mut self.mort_a_annual_rate_percent).speed(0.1));
-                });
-                ui_a.horizontal(|ui| {
-                    ui.label("Years:");
-                    ui.add(egui::DragValue::new(&mut self.mort_a_years).speed(1.0));
-                });
-                ui_a.horizontal(|ui| {
-                    ui.label("Payment frequency:");
-                    egui::ComboBox::from_id_source("mort_a_freq")
-                        .selected_text(match self.mort_a_frequency {
-                            PaymentFrequency::Monthly => "Monthly",
-                            PaymentFrequency::BiWeekly => "Bi-weekly",
-                            PaymentFrequency::Weekly => "Weekly",
-                            PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.mort_a_frequency, PaymentFrequency::Monthly, "Monthly");
-                            ui.selectable_value(&mut self.mort_a_frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
-                            ui.selectable_value(&mut self.mort_a_frequency, PaymentFrequency::Weekly, "Weekly");
-                            ui.selectable_value(
-                                &mut self.mort_a_frequency,
-                                PaymentFrequency::AcceleratedWeekly,
-                                "Accelerated weekly",
-                            );
-                        });
-                });
-                if let Some(ref err) = self.mort_a_error {
-                    ui_a.colored_label(egui::Color32::RED, err);
+            ui.horizontal(|ui| {
+                ui.label("File:");
+                ui.text_edit_singleline(&mut self.mortgage_state_file);
+                if ui.button("Save").clicked() {
+                    self.save_mortgage_state();
                 }
-                if let Some(p) = self.mort_a_monthly_payment {
-                    ui_a.label(format!("Payment per period: ${:.2}", p));
-                }
-                if let (Some(t), Some(i)) = (self.mort_a_total_paid, self.mort_a_total_interest) {
-                    ui_a.label(format!("Total paid: ${:.2}", t));
-                    ui_a.label(format!("Total interest: ${:.2}", i));
-                }
-
-                let ui_b = &mut cols[1];
-                ui_b.heading("Mortgage B");
-                ui_b.horizontal(|ui| {
-                    ui.label("Principal ($):");
-                    ui.add(egui::DragValue::new(&mut self.mort_b_principal).speed(1000.0));
-                });
-                ui_b.horizontal(|ui| {
-                    ui.label("Annual rate (%):");
-                    ui.add(egui::DragValue::new(&mut self.mort_b_annual_rate_percent).speed(0.1));
-                });
-                ui_b.horizontal(|ui| {
-                    ui.label("Years:");
-                    ui.add(egui::DragValue::new(&mut self.mort_b_years).speed(1.0));
-                });
-                ui_b.horizontal(|ui| {
-                    ui.label("Payment frequency:");
-                    egui::ComboBox::from_id_source("mort_b_freq")
-                        .selected_text(match self.mort_b_frequency {
-                            PaymentFrequency::Monthly => "Monthly",
-                            PaymentFrequency::BiWeekly => "Bi-weekly",
-                            PaymentFrequency::Weekly => "Weekly",
-                            PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.mort_b_frequency, PaymentFrequency::Monthly, "Monthly");
-                            ui.selectable_value(&mut self.mort_b_frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
-                            ui.selectable_value(&mut self.mort_b_frequency, PaymentFrequency::Weekly, "Weekly");
-                            ui.selectable_value(
-                                &mut self.mort_b_frequency,
-                                PaymentFrequency::AcceleratedWeekly,
-                                "Accelerated weekly",
-                            );
-                        });
-                });
-                if let Some(ref err) = self.mort_b_error {
-                    ui_b.colored_label(egui::Color32::RED, err);
-                }
-                if let Some(p) = self.mort_b_monthly_payment {
-                    ui_b.label(format!("Payment per period: ${:.2}", p));
-                }
-                if let (Some(t), Some(i)) = (self.mort_b_total_paid, self.mort_b_total_interest) {
-                    ui_b.label(format!("Total paid: ${:.2}", t));
-                    ui_b.label(format!("Total interest: ${:.2}", i));
+                if ui.button("Load").clicked() {
+                    self.load_mortgage_state();
                 }
             });
 
-            if ui.button("Compute Both Mortgages").clicked() {
-                // Mortgage A
-                if self.mort_a_principal <= 0.0 || self.mort_a_years <= 0.0 {
-                    self.mort_a_monthly_payment = None;
-                    self.mort_a_total_paid = None;
-                    self.mort_a_total_interest = None;
-                    self.mort_a_error = Some("Mortgage A: Principal and years must be positive.".to_string());
-                } else {
-                    let principal = self.mort_a_principal as f64;
-                    let annual = self.mort_a_annual_rate_percent as f64 / 100.0;
-                    let years_u32 = self.mort_a_years.round().max(1.0) as u32;
-                    let pmt = mortgage_payment_with_frequency(
-                        principal,
-                        annual,
-                        years_u32,
-                        self.mort_a_frequency,
-                    );
-                    let sched = mortgage_amortization_schedule_with_frequency(
-                        principal,
-                        annual,
-                        years_u32,
-                        self.mort_a_frequency,
-                    );
-                    let total: f64 = sched.iter().map(|p| p.payment).sum();
-                    let interest = total - principal;
-                    self.mort_a_monthly_payment = Some(pmt);
-                    self.mort_a_total_paid = Some(total);
-                    self.mort_a_total_interest = Some(interest);
-                    self.mort_a_error = None;
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.heading("Mortgage Scenarios");
+                if ui.button("Add Mortgage Scenario").clicked() {
+                    let label = FinancerApp::next_scenario_label(self.mortgage_scenarios.len());
+                    self.mortgage_scenarios.push(MortgageScenario {
+                        name: label,
+                        title: String::new(),
+                        principal: 300_000.0,
+                        annual_rate_percent: 5.0,
+                        years: 30.0,
+                        frequency: PaymentFrequency::Monthly,
+                        payment_per_period: None,
+                        total_paid: None,
+                        total_interest: None,
+                        error: None,
+                    });
                 }
+            });
 
-                // Mortgage B
-                if self.mort_b_principal <= 0.0 || self.mort_b_years <= 0.0 {
-                    self.mort_b_monthly_payment = None;
-                    self.mort_b_total_paid = None;
-                    self.mort_b_total_interest = None;
-                    self.mort_b_error = Some("Mortgage B: Principal and years must be positive.".to_string());
-                } else {
-                    let principal = self.mort_b_principal as f64;
-                    let annual = self.mort_b_annual_rate_percent as f64 / 100.0;
-                    let years_u32 = self.mort_b_years.round().max(1.0) as u32;
-                    let pmt = mortgage_payment_with_frequency(
-                        principal,
-                        annual,
-                        years_u32,
-                        self.mort_b_frequency,
-                    );
-                    let sched = mortgage_amortization_schedule_with_frequency(
-                        principal,
-                        annual,
-                        years_u32,
-                        self.mort_b_frequency,
-                    );
-                    let total: f64 = sched.iter().map(|p| p.payment).sum();
-                    let interest = total - principal;
-                    self.mort_b_monthly_payment = Some(pmt);
-                    self.mort_b_total_paid = Some(total);
-                    self.mort_b_total_interest = Some(interest);
-                    self.mort_b_error = None;
+            ui.separator();
+
+            if self.mortgage_scenarios.is_empty() {
+                ui.label("No mortgage scenarios defined.");
+            } else {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let count = self.mortgage_scenarios.len();
+                    let cols_count = count.min(3);
+                    let can_delete = count > 1;
+                    let mut to_delete: Option<usize> = None;
+                    ui.columns(cols_count, |cols| {
+                        for (idx, scen) in self.mortgage_scenarios.iter_mut().enumerate() {
+                            let col = idx % cols_count;
+                            let mut delete_here = false;
+                            cols[col].group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.heading(format!("Mortgage {}", scen.name));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                            delete_here = true;
+                                        }
+                                    });
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Name:");
+                                    ui.text_edit_singleline(&mut scen.title);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Principal ($):");
+                                    ui.add(egui::DragValue::new(&mut scen.principal).speed(1000.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Annual rate (%):");
+                                    ui.add(egui::DragValue::new(&mut scen.annual_rate_percent).speed(0.1));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Years:");
+                                    ui.add(egui::DragValue::new(&mut scen.years).speed(1.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Payment frequency:");
+                                    egui::ComboBox::from_id_source(format!("mort_freq_{}", scen.name))
+                                        .selected_text(match scen.frequency {
+                                            PaymentFrequency::Monthly => "Monthly",
+                                            PaymentFrequency::BiWeekly => "Bi-weekly",
+                                            PaymentFrequency::Weekly => "Weekly",
+                                            PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::Monthly, "Monthly");
+                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
+                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::Weekly, "Weekly");
+                                            ui.selectable_value(
+                                                &mut scen.frequency,
+                                                PaymentFrequency::AcceleratedWeekly,
+                                                "Accelerated weekly",
+                                            );
+                                        });
+                                });
+                                if let Some(ref err) = scen.error {
+                                    ui.colored_label(egui::Color32::RED, err);
+                                }
+                                if let Some(p) = scen.payment_per_period {
+                                    ui.label(format!("Payment per period: ${:.2}", p));
+                                }
+                                if let (Some(t), Some(i)) = (scen.total_paid, scen.total_interest) {
+                                    ui.label(format!("Total paid: ${:.2}", t));
+                                    ui.label(format!("Total interest: ${:.2}", i));
+                                }
+                            });
+                            if delete_here {
+                                to_delete = Some(idx);
+                            }
+                        }
+                    });
+
+                    if let Some(idx) = to_delete {
+                        if self.mortgage_scenarios.len() > 1 {
+                            self.mortgage_scenarios.remove(idx);
+                        }
+                    }
+                });
+            }
+
+            if ui.button("Compute All Mortgages").clicked() {
+                for scen in &mut self.mortgage_scenarios {
+                    if scen.principal <= 0.0 || scen.years <= 0.0 {
+                        scen.payment_per_period = None;
+                        scen.total_paid = None;
+                        scen.total_interest = None;
+                        scen.error = Some(format!(
+                            "Mortgage {}: Principal and years must be positive.",
+                            scen.name
+                        ));
+                    } else {
+                        let principal = scen.principal as f64;
+                        let annual = scen.annual_rate_percent as f64 / 100.0;
+                        let years_u32 = scen.years.round().max(1.0) as u32;
+                        let pmt = mortgage_payment_with_frequency(
+                            principal,
+                            annual,
+                            years_u32,
+                            scen.frequency,
+                        );
+                        let sched = mortgage_amortization_schedule_with_frequency(
+                            principal,
+                            annual,
+                            years_u32,
+                            scen.frequency,
+                        );
+                        let total: f64 = sched.iter().map(|p| p.payment).sum();
+                        let interest = total - principal;
+                        scen.payment_per_period = Some(pmt);
+                        scen.total_paid = Some(total);
+                        scen.total_interest = Some(interest);
+                        scen.error = None;
+                    }
                 }
             }
 
             ui.separator();
             ui.heading("Comparison");
-            if let (Some(pmt_a), Some(pmt_b)) = (self.mort_a_monthly_payment, self.mort_b_monthly_payment) {
-                if (pmt_a - pmt_b).abs() > f64::EPSILON {
-                    if pmt_a < pmt_b {
-                        ui.label(format!("Mortgage A has a lower payment per period by ${:.2}", pmt_b - pmt_a));
-                    } else {
-                        ui.label(format!("Mortgage B has a lower payment per period by ${:.2}", pmt_a - pmt_b));
-                    }
-                }
+
+            if let Some((name, title, pmt)) = self
+                .mortgage_scenarios
+                .iter()
+                .filter_map(|s| s.payment_per_period.map(|p| (s.name.clone(), s.title.clone(), p)))
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            {
+                let label = if title.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{} ({})", name, title)
+                };
+                ui.label(format!(
+                    "Mortgage {} has the lowest payment per period at ${:.2}",
+                    label, pmt
+                ));
             }
-            if let (Some(int_a), Some(int_b)) = (self.mort_a_total_interest, self.mort_b_total_interest) {
-                if int_a < int_b {
-                    ui.label(format!("Mortgage A pays ${:.2} less interest over the term", int_b - int_a));
-                } else if int_b < int_a {
-                    ui.label(format!("Mortgage B pays ${:.2} less interest over the term", int_a - int_b));
-                }
+
+            if let Some((name, title, interest)) = self
+                .mortgage_scenarios
+                .iter()
+                .filter_map(|s| s.total_interest.map(|i| (s.name.clone(), s.title.clone(), i)))
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            {
+                let label = if title.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{} ({})", name, title)
+                };
+                ui.label(format!(
+                    "Mortgage {} pays the least total interest: ${:.2}",
+                    label, interest
+                ));
             }
         });
     }
