@@ -2004,20 +2004,39 @@ impl FinancerApp {
                 }
 
                 let cols_count = count.min(3);
+                let can_delete = count > 1;
+                let mut to_delete: Option<usize> = None;
                 ui.columns(cols_count, |cols| {
                     for (idx, scen) in self.cf_scenarios.iter_mut().enumerate() {
                         let col = idx % cols_count;
+                        let mut delete_here = false;
                         cols[col].group(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.heading(format!("Scenario {}", scen.name));
-                                    ui.label("Name:");
-                                    ui.text_edit_singleline(&mut scen.title);
+                            ui.horizontal(|ui| {
+                                ui.heading(format!("Scenario {}", scen.name));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                        delete_here = true;
+                                    }
                                 });
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Name:");
+                                ui.text_edit_singleline(&mut scen.title);
+                            });
                             ui.label("Enter one cash flow per line: 'YYYY-MM-DD amount'");
                             ui.text_edit_multiline(&mut scen.lines);
                         });
+                        if delete_here {
+                            to_delete = Some(idx);
+                        }
                     }
                 });
+
+                if let Some(idx) = to_delete {
+                    if self.cf_scenarios.len() > 1 {
+                        self.cf_scenarios.remove(idx);
+                    }
+                }
             });
 
             if ui.button("Compute PV & FV for all scenarios").clicked() {
@@ -2212,12 +2231,22 @@ impl FinancerApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let count = self.bond_scenarios.len();
                     let cols_count = count.min(3);
+                    let can_delete = count > 1;
+                    let mut to_delete: Option<usize> = None;
                     ui.columns(cols_count, |cols| {
                         for (idx, scen) in self.bond_scenarios.iter_mut().enumerate() {
                             let col = idx % cols_count;
+                            let mut delete_here = false;
                             cols[col].group(|ui| {
                                 ui.horizontal(|ui| {
                                     ui.heading(format!("Bond {}", scen.name));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                            delete_here = true;
+                                        }
+                                    });
+                                });
+                                ui.horizontal(|ui| {
                                     ui.label("Name:");
                                     ui.text_edit_singleline(&mut scen.title);
                                 });
@@ -2248,8 +2277,17 @@ impl FinancerApp {
                                     ui.label(format!("Price: ${:.2}", price));
                                 }
                             });
+                            if delete_here {
+                                to_delete = Some(idx);
+                            }
                         }
                     });
+
+                    if let Some(idx) = to_delete {
+                        if self.bond_scenarios.len() > 1 {
+                            self.bond_scenarios.remove(idx);
+                        }
+                    }
                 });
             }
 
@@ -2345,12 +2383,22 @@ impl FinancerApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let count = self.mortgage_scenarios.len();
                     let cols_count = count.min(3);
+                    let can_delete = count > 1;
+                    let mut to_delete: Option<usize> = None;
                     ui.columns(cols_count, |cols| {
                         for (idx, scen) in self.mortgage_scenarios.iter_mut().enumerate() {
                             let col = idx % cols_count;
+                            let mut delete_here = false;
                             cols[col].group(|ui| {
                                 ui.horizontal(|ui| {
                                     ui.heading(format!("Mortgage {}", scen.name));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                            delete_here = true;
+                                        }
+                                    });
+                                });
+                                ui.horizontal(|ui| {
                                     ui.label("Name:");
                                     ui.text_edit_singleline(&mut scen.title);
                                 });
@@ -2397,8 +2445,17 @@ impl FinancerApp {
                                     ui.label(format!("Total interest: ${:.2}", i));
                                 }
                             });
+                            if delete_here {
+                                to_delete = Some(idx);
+                            }
                         }
                     });
+
+                    if let Some(idx) = to_delete {
+                        if self.mortgage_scenarios.len() > 1 {
+                            self.mortgage_scenarios.remove(idx);
+                        }
+                    }
                 });
             }
 
