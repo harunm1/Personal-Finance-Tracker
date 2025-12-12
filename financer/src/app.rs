@@ -1586,17 +1586,19 @@ impl FinancerApp {
                     match wtr {
                         Ok(mut writer) => {
                             let _ = writer.write_record(&[
-                                "id", "account_id", "contact_id", "amount", "category", "date", "amount_cents", "balance_after"
+                                "account_name", "amount", "category", "date", "balance_after"
                             ]);
                             for tx in &filtered_transactions {
+                                let account_name = self.accounts_list
+                                    .iter()
+                                    .find(|a| a.id == tx.user_account_id)
+                                    .map(|a| a.name.clone())
+                                    .unwrap_or_else(|| "Unknown".to_string());
                                 let _ = writer.write_record(&[
-                                    tx.id.to_string(),
-                                    tx.user_account_id.to_string(),
-                                    tx.contact_id.to_string(),
+                                    account_name,
                                     tx.amount.to_string(),
                                     tx.category.clone(),
                                     tx.date.clone(),
-                                    tx.amount_cents.to_string(),
                                     tx.balance_after.to_string(),
                                 ]);
                             }
@@ -2056,11 +2058,16 @@ impl FinancerApp {
                         Ok(mut writer) => {
                             // Write header
                             let _ = writer.write_record(&[
-                                "id", "user_account_id", "amount", "category", "date"
+                                "account_name", "amount", "category", "date"
                             ]);
                             for tx in &filtered_transfers {
+                                let account_name = self.accounts_list
+                                    .iter()
+                                    .find(|a| a.id == tx.user_account_id)
+                                    .map(|a| a.name.clone())
+                                    .unwrap_or_else(|| "Unknown".to_string());
                                 let _ = writer.write_record(&[
-                                    tx.id.to_string(),
+                                    account_name,
                                     tx.user_account_id.to_string(),
                                     tx.amount.to_string(),
                                     tx.category.clone(),
