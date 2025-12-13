@@ -111,7 +111,7 @@ impl Period {
             "Weekly" => Period::Weekly,
             "Monthly" => Period::Monthly,
             "Yearly" => Period::Yearly,
-            _ => Period::Monthly, // default
+            _ => Period::Monthly,
         }
     }
 }
@@ -135,7 +135,7 @@ impl TargetType {
         match s {
             "Expense" => TargetType::Expense,
             "Income" => TargetType::Income,
-            _ => TargetType::Expense, // default
+            _ => TargetType::Expense, 
         }
     }
 }
