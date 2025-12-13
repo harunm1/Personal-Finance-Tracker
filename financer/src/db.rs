@@ -65,6 +65,7 @@ pub fn get_userid_by_username(conn: &mut SqliteConnection, search_username: &str
     users.filter(username.eq(search_username)).first::<User>(conn)
 }
 
+#[allow(dead_code)]
 pub fn create_contact(conn: &mut SqliteConnection, new_name: &str, new_user: i32) -> Result<usize, Error> {
     let new_contact = NewContact {
         name: new_name,
@@ -230,6 +231,7 @@ pub fn get_spend_for_category_period(
     Ok(result.flatten().unwrap_or(0))
 }
 
+#[allow(dead_code)]
 pub fn get_spend_by_category_period(
     conn: &mut SqliteConnection,
     owner_id: i32,

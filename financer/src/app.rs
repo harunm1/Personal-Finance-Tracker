@@ -16,10 +16,8 @@ use crate::finance_calculations::{
     mortgage_payment_with_frequency,
     mortgage_amortization_schedule_with_frequency,
 };
-use egui_plot::{Plot, Line, PlotPoints, Text as PlotText};
-use egui::epaint::Shape;
+use egui_plot::{Plot, Line, Text as PlotText};
 use std::collections::HashMap;
-use std::f32::consts::TAU;
 use chrono::{NaiveDateTime,NaiveDate,Datelike};
 use eframe::egui::Color32;
 use csv::Writer;
@@ -1521,7 +1519,7 @@ impl FinancerApp {
                         })
                         .collect();
 
-                    let mut wtr = Writer::from_path(&file_path);
+                    let wtr = Writer::from_path(&file_path);
                     match wtr {
                         Ok(mut writer) => {
                             let _ = writer.write_record(&[
@@ -1966,7 +1964,7 @@ impl FinancerApp {
                         })
                         .collect();
 
-                    let mut wtr = csv::Writer::from_path(&file_path);
+                    let wtr = csv::Writer::from_path(&file_path);
                     match wtr {
                         Ok(mut writer) => {
                             let _ = writer.write_record(&[
