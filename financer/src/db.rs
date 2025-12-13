@@ -20,19 +20,16 @@ pub fn establish_connection() -> SqliteConnection {
 }
 
 pub fn create_user(conn: &mut SqliteConnection, new_username: &str, new_password: &str, new_email: Option<&str>) -> Result<usize, Error> {
-    // check if user already exists
     if users.filter(username.eq(new_username)).first::<User>(conn).optional()?.is_some() {
         println!("User already exists: {}", new_username);
         return Err(Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, Box::new("Username already exists".to_string())));
     }
-    // validate email if provided
     if let Some(email_str) = new_email {
         if !EmailAddress::is_valid(email_str) {
             println!("Invalid email format: {}", email_str);
             return Err(Error::DatabaseError(diesel::result::DatabaseErrorKind::Unknown, Box::new("Invalid email format".to_string())));
         }
     }
-    // Hash the password
     let salt = SaltString::generate(&mut rand::thread_rng());
     let argon2 = Argon2::default();
     let hashed_password = argon2.hash_password(new_password.as_bytes(), &salt).expect("Error hashing password").to_string();
@@ -87,7 +84,6 @@ pub fn create_transaction(
     
     let cents = (new_amount * 100.0) as i32;
     
-    // Get current account balance
     let current_account: Account = accounts.filter(id.eq(new_user_account)).first(conn)?;
     let new_balance = current_account.balance + new_amount;
     
@@ -103,7 +99,6 @@ pub fn create_transaction(
     
     let result = diesel::insert_into(transactions).values(&new_transaction).execute(conn)?;
     
-    // Update account balance
     update_account_balance(conn, new_user_account, new_amount)?;
     
     Ok(result)
@@ -116,24 +111,21 @@ pub fn create_transfer(
     transfer_amount: f32,
     transfer_date: String,
 ) -> Result<(), Error> {
-    // Use a transaction to ensure atomicity
     conn.transaction::<_, Error, _>(|conn| {
-        // Create withdrawal from source account
         create_transaction(
             conn,
             from_account_id,
-            0, // no contact
-            -transfer_amount.abs(), // negative for withdrawal
+            0,
+            -transfer_amount.abs(),
             "Transfer".to_string(),
             transfer_date.clone(),
         )?;
         
-        // Create deposit to destination account
         create_transaction(
             conn,
             to_account_id,
-            0, // no contact
-            transfer_amount.abs(), // positive for deposit
+            0,
+            transfer_amount.abs(),
             "Transfer".to_string(),
             transfer_date,
         )?;
@@ -143,25 +135,16 @@ pub fn create_transfer(
 }
 
 pub fn verify_user(conn: &mut SqliteConnection, login_username: &str, login_password: &str) -> Result<bool, Error> {
-    // Try to find username
     match users.filter(username.eq(login_username)).first::<User>(conn){
         Ok(u) => {
-            // Verify the hashed password
             let parsed_hash = PasswordHash::new(&u.password_hash).expect("Error parsing password hash");
             let argon2 = Argon2::default();
             Ok(argon2.verify_password(login_password.as_bytes(), &parsed_hash).is_ok())
         }
-        // User not found
         Err(diesel::result::Error::NotFound) => Ok(false),
-        // Any other errors 
         Err(e) => Err(e),
     }
 }
-
-
-
-
-//Budgeting functions
 
 pub fn create_budget(conn: &mut SqliteConnection, new_budget: NewBudget) -> Result<Budget, Error> {
     use crate::schema::budgets::dsl::*;
@@ -204,7 +187,6 @@ pub fn delete_budget(conn: &mut SqliteConnection, budget_id: i32) -> Result<usiz
         .execute(conn)
 }
 
-// Aggregation: total spent/received in a period for a category across all user accounts.
 pub fn get_spend_for_category_period(
     conn: &mut SqliteConnection,
     owner_id: i32,
@@ -261,7 +243,6 @@ pub fn get_spend_by_category_period(
         })
 }
 
-// Get all transactions for a user (across all their accounts)
 pub fn get_user_transactions(conn: &mut SqliteConnection, owner_id: i32) -> Result<Vec<Transaction>, Error> {
     use crate::schema::transactions::dsl::*;
     use crate::schema::accounts;
@@ -274,13 +255,11 @@ pub fn get_user_transactions(conn: &mut SqliteConnection, owner_id: i32) -> Resu
         .load::<Transaction>(conn)
 }
 
-// Get all unique categories used by a user (from both budgets and transactions)
 pub fn get_user_categories(conn: &mut SqliteConnection, owner_id: i32) -> Result<Vec<String>, Error> {
     use crate::schema::transactions::dsl::*;
     use crate::schema::accounts;
     use crate::schema::budgets;
     
-    // Get categories from transactions
     let tx_categories: Vec<String> = transactions
         .inner_join(accounts::table.on(user_account_id.eq(accounts::id)))
         .filter(accounts::user_id.eq(owner_id))
@@ -288,7 +267,6 @@ pub fn get_user_categories(conn: &mut SqliteConnection, owner_id: i32) -> Result
         .distinct()
         .load::<String>(conn)?;
     
-    // Get categories from budgets
     let budget_categories: Vec<String> = budgets::table
         .filter(budgets::user_id.eq(owner_id))
         .filter(budgets::active.eq(true))
@@ -296,7 +274,6 @@ pub fn get_user_categories(conn: &mut SqliteConnection, owner_id: i32) -> Result
         .distinct()
         .load::<String>(conn)?;
     
-    // Merge and deduplicate
     let mut all_categories: Vec<String> = tx_categories.into_iter()
         .chain(budget_categories.into_iter())
         .collect();
@@ -306,7 +283,6 @@ pub fn get_user_categories(conn: &mut SqliteConnection, owner_id: i32) -> Result
     Ok(all_categories)
 }
 
-// Update a transaction
 pub fn update_transaction(
     conn: &mut SqliteConnection,
     transaction_id: i32,
@@ -318,18 +294,14 @@ pub fn update_transaction(
     use crate::schema::transactions::dsl::*;
     use crate::schema::accounts;
     
-    // Save old transaction to revert its balance impact
     let old_tx: Transaction = transactions.filter(id.eq(transaction_id)).first(conn)?;
     
     let cents = (new_amount * 100.0) as i32;
     
-    // Revert old transaction's balance impact
     update_account_balance(conn, old_tx.user_account_id, -old_tx.amount)?;
-    
-    // Apply new transaction's balance impact
+
     update_account_balance(conn, new_user_account, new_amount)?;
     
-    // Get the new balance after update
     let current_account: Account = accounts::table.filter(accounts::id.eq(new_user_account)).first(conn)?;
     let new_balance_after = current_account.balance;
     
@@ -347,23 +319,19 @@ pub fn update_transaction(
     Ok(result)
 }
 
-// Delete a transaction
 pub fn delete_transaction(conn: &mut SqliteConnection, transaction_id: i32) -> Result<usize, Error> {
     use crate::schema::transactions::dsl::*;
     
-    // Save old transaction to revert its balance impact
     let old_tx: Transaction = transactions.filter(id.eq(transaction_id)).first(conn)?;
     
     let result = diesel::delete(transactions.filter(id.eq(transaction_id)))
         .execute(conn)?;
     
-    // Revert the transaction's balance impact
     update_account_balance(conn, old_tx.user_account_id, -old_tx.amount)?;
     
     Ok(result)
 }
 
-// Helper function to update account balance
 fn update_account_balance(
     conn: &mut SqliteConnection,
     account_id: i32,
@@ -371,7 +339,6 @@ fn update_account_balance(
 ) -> Result<usize, Error> {
     use crate::schema::accounts::dsl::*;
     
-    // Get current balance
     let current_account: Account = accounts.filter(id.eq(account_id)).first(conn)?;
     let new_balance = current_account.balance + amount_change;
     
