@@ -243,7 +243,8 @@ Once all dependencies and database setup steps are complete, run the application
 ```bash
 cargo run
 ```
-
+#### Notes: 
+All commands must be executed from the project root directory (financer)
 
 
 ### Project Proposal References
