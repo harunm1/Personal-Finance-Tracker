@@ -2,3 +2,6 @@
 Cargo.lock
 target/
 db/
+bond_state.json
+cashflow_state.json
+mortgage_state.json
