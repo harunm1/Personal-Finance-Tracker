@@ -19,11 +19,6 @@ pub fn present_value(future_value: f64, annual_rate: f64, years: f64, compoundin
     future_value / (1.0 + rate_per_period).powf(n_periods)
 }
 
-/// Present value of dated cash flows using a continuous-time approximation.
-///
-/// - `cash_flows`: (date, amount)
-/// - `valuation_date`: date at which PV is computed
-/// - `real_annual_rate`: effective real annual discount rate (e.g. from `real_rate`)
 pub fn present_value_of_dated_cash_flows(
     cash_flows: &[(NaiveDate, f64)],
     valuation_date: NaiveDate,
@@ -43,9 +38,6 @@ pub fn present_value_of_dated_cash_flows(
         .sum()
 }
 
-/// Future value of dated cash flows at a given horizon date.
-///
-/// - `horizon_date`: the date at which FV is computed
 pub fn future_value_of_dated_cash_flows(
     cash_flows: &[(NaiveDate, f64)],
     horizon_date: NaiveDate,
@@ -101,8 +93,6 @@ pub enum PaymentFrequency {
     Monthly,
     BiWeekly,
     Weekly,
-    /// Accelerated weekly: use a weekly schedule but a payment equal to
-    /// (monthly payment * 12 / 52), resulting in more paid per year.
     AcceleratedWeekly,
 }
 
@@ -116,7 +106,6 @@ impl PaymentFrequency {
     }
 }
 
-/// Generic mortgage payment for a given payment frequency.
 pub fn mortgage_payment_with_frequency(
     principal: f64,
     annual_rate: f64,
@@ -130,8 +119,6 @@ pub fn mortgage_payment_with_frequency(
         return principal / total_periods;
     }
 
-    // For accelerated weekly, base the payment on the standard
-    // monthly payment and convert to an equivalent weekly amount.
     if matches!(frequency, PaymentFrequency::AcceleratedWeekly) {
         let monthly = mortgage_monthly_payment(principal, annual_rate, years);
         return monthly * 12.0 / 52.0;
@@ -143,7 +130,6 @@ pub fn mortgage_payment_with_frequency(
     numerator / denominator
 }
 
-/// Amortization schedule for a given frequency (including accelerated weekly).
 pub fn mortgage_amortization_schedule_with_frequency(
     principal: f64,
     annual_rate: f64,
@@ -192,7 +178,6 @@ pub fn mortgage_amortization_schedule_with_frequency(
     schedule
 }
 
-/// Backwards-compatible monthly payment wrapper.
 pub fn mortgage_monthly_payment(principal: f64, annual_rate: f64, years: u32) -> f64 {
     mortgage_payment_with_frequency(principal, annual_rate, years, PaymentFrequency::Monthly)
 }
@@ -231,7 +216,7 @@ mod tests {
     #[test]
     fn test_price_bond_par_at_equal_coupon_and_yield() {
         let price = price_bond(1000.0, 0.05, 0.05, 10.0, 2);
-        assert!((price - 1000.0).abs() < 1.0); // allow small numerical difference
+        assert!((price - 1000.0).abs() < 1.0);
     }
 
     #[test]
@@ -275,7 +260,6 @@ mod tests {
         );
         let total_accel: f64 = sched_accel.iter().map(|p| p.payment).sum();
 
-        // Accelerated weekly should result in less total interest, hence lower total paid.
         assert!(total_accel < total_weekly);
     }
 }
