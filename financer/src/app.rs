@@ -2058,7 +2058,7 @@ impl FinancerApp {
                         Ok(mut writer) => {
                             // Write header
                             let _ = writer.write_record(&[
-                                "account_name", "amount", "category", "date"
+                                "account_name", "amount", "category", "date", "balance_after"
                             ]);
                             for tx in &filtered_transfers {
                                 let account_name = self.accounts_list
@@ -2068,10 +2068,10 @@ impl FinancerApp {
                                     .unwrap_or_else(|| "Unknown".to_string());
                                 let _ = writer.write_record(&[
                                     account_name,
-                                    tx.user_account_id.to_string(),
                                     tx.amount.to_string(),
                                     tx.category.clone(),
                                     tx.date.clone(),
+                                    format!("{:.2}", tx.balance_after),
                                 ]);
                             }
                             let _ = writer.flush();
