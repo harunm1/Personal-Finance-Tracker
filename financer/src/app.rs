@@ -93,7 +93,7 @@ struct MortgageScenario {
 
 pub struct FinancerApp {
     username: String,
-    user_id: Option<i32>, //initially there wont be a value until the user logs in
+    user_id: Option<i32>,
     password: String,
     email: String,
     message: String,
@@ -476,12 +476,10 @@ impl FinancerApp {
         }
     }
 
-    // Budgeting display helpers
     fn show_expense_pie_chart(&mut self, ui: &mut egui::Ui) {
         // Get the current period range
         let (start, end) = Self::get_period_range(self.selected_budget_period, self.period_offset);
 
-        // Collect negative transactions (expenses) for the current period
         let mut category_totals: Vec<(String, f32)> = {
             let mut map = std::collections::HashMap::<String, f32>::new();
             for tx in &self.transactions_list {
@@ -500,19 +498,15 @@ impl FinancerApp {
             return;
         }
 
-        // Sort alphabetically for stable order
         category_totals.sort_by(|a, b| a.0.cmp(&b.0));
 
-        // Total
         let total: f32 = category_totals.iter().map(|(_, v)| *v).sum();
 
         ui.label("Expense Breakdown");
 
-        // Horizontal layout: pie chart on left, legend on right
         ui.horizontal(|ui| {
             // Pie chart
             ui.vertical(|ui| {
-                // Add dynamic vertical space above the pie chart
                 let available_height = ui.available_height();
                 ui.add_space(available_height * 0.05);
 
@@ -524,7 +518,6 @@ impl FinancerApp {
                 let center = rect.center();
                 let radius = 70.0;
 
-                // Stable colors
                 let colors = [
                     egui::Color32::from_rgb(255, 99, 132),
                     egui::Color32::from_rgb(54, 162, 235),
@@ -554,7 +547,6 @@ impl FinancerApp {
                         egui::Stroke::NONE,
                     ));
 
-                    // Percentage label
                     let mid_angle = (start_angle + end_angle) / 2.0;
                     let label_pos =
                         center + egui::vec2(mid_angle.cos(), mid_angle.sin()) * (radius * 0.55);
@@ -570,7 +562,6 @@ impl FinancerApp {
                 }
             });
 
-            // Legend
             ui.vertical(|ui| {
                 ui.label("Legend:");
                 for (i, (category, amount)) in category_totals.iter().enumerate() {
@@ -600,15 +591,14 @@ impl FinancerApp {
 
     fn show_income_line_chart(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            ui.add_space(10.0); // Horizontal space to push content right
+            ui.add_space(10.0);
 
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.add_space(40.0); // Fine-tune this value for more/less right shift
+                    ui.add_space(40.0);
                     ui.label("Income Progression");
                 });
 
-                // Aggregate income by month/year
                 let mut income_by_month: Vec<((i32, u32), f32)> = Vec::new();
 
                 for tx in &self.transactions_list {
@@ -658,7 +648,6 @@ impl FinancerApp {
         });
     }
 
-    // Transaction helpers
     fn load_user_transactions(&mut self) {
         if let Some(uid) = self.user_id {
             self.transactions_list = db::get_user_transactions(&mut self.conn, uid).unwrap_or_default();
@@ -670,7 +659,6 @@ impl FinancerApp {
     fn load_user_categories(&mut self) {
         if let Some(uid) = self.user_id {
             self.user_categories = db::get_user_categories(&mut self.conn, uid).unwrap_or_default();
-            // Limit to 50 categories
             if self.user_categories.len() > 50 {
                 self.user_categories.truncate(50);
             }
@@ -690,11 +678,9 @@ impl FinancerApp {
         all
     }
 
-    // Helper function to show date selector with dropdowns
     fn show_date_selector(ui: &mut egui::Ui, date_string: &mut String, id_prefix: &str) {
         use chrono::Datelike;
         
-        // Parse current date or use today as default
         let current_date = chrono::NaiveDate::parse_from_str(date_string, "%Y-%m-%d")
             .unwrap_or_else(|_| chrono::Local::now().date_naive());
         
@@ -704,7 +690,6 @@ impl FinancerApp {
         
         let mut changed = false;
         
-        // Year dropdown
         egui::ComboBox::from_id_source(format!("{}_year", id_prefix))
             .selected_text(format!("{}", year))
             .width(70.0)
@@ -718,7 +703,6 @@ impl FinancerApp {
         
         ui.label("-");
         
-        // Month dropdown
         let month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         egui::ComboBox::from_id_source(format!("{}_month", id_prefix))
@@ -734,14 +718,12 @@ impl FinancerApp {
         
         ui.label("-");
         
-        // Day dropdown
         let max_day = match month {
             2 => if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 29 } else { 28 },
             4 | 6 | 9 | 11 => 30,
             _ => 31,
         };
         
-        // Clamp day if needed
         if day > max_day {
             day = max_day;
             changed = true;
@@ -758,7 +740,6 @@ impl FinancerApp {
                 }
             });
         
-        // Update the date string if changed
         if changed {
             if let Some(new_date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
                 *date_string = new_date.format("%Y-%m-%d").to_string();
@@ -779,9 +760,7 @@ impl FinancerApp {
             if ui.button("Login").clicked() {
                 match db::verify_user(&mut self.conn, &self.username, &self.password) {
                     Ok(true) => {
-                        // get user_id
                         self.user_id = db::get_userid_by_username(&mut self.conn, &self.username).ok().map(|u| u.id);
-                        // load user accounts
                         if let Some(uid) = self.user_id {
                             self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
                         }
@@ -876,7 +855,6 @@ impl FinancerApp {
                     });
                 }
                 
-                // Handle click outside the loop to avoid borrow issues
                 if let Some(account_id) = clicked_account_id {
                     self.tx_filter_account_id = Some(account_id);
                     self.screen = AppState::Transactions;
@@ -908,9 +886,7 @@ impl FinancerApp {
                     match db::create_account(&mut self.conn, &self.new_account_name, &self.new_account_type, self.new_account_balance, uid) {
                         Ok(_) => {
                             self.message = "Account created successfully.".to_string();
-                            // Refresh account list
                             self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
-                            // Clear input fields
                             self.new_account_name.clear();
                             self.new_account_type.clear();
                             self.new_account_balance = 0.0;
@@ -942,7 +918,7 @@ impl FinancerApp {
             }
 
             if ui.button("Transactions").clicked() {
-                self.tx_filter_account_id = None; // Clear account filter when navigating via button
+                self.tx_filter_account_id = None;
                 self.screen = AppState::Transactions;
                 self.load_user_transactions();
                 self.load_user_categories();
@@ -969,7 +945,6 @@ impl FinancerApp {
         });
     }
 
-    // load budgets for current user
     fn load_user_budgets(&mut self) {
         if let Some(uid) = self.user_id {
             match db::get_user_budgets(&mut self.conn, uid) {
@@ -983,8 +958,6 @@ impl FinancerApp {
 
 
     fn get_period_range(period: Period, offset: i32) -> (NaiveDateTime, NaiveDateTime) {
-        // minimal example — uses chrono and assumes Local::today -> convert to NaiveDateTime at midnight.
-        // Replace with your preferred week-start logic.
         use chrono::{Datelike, Duration, Local, NaiveDate};
         let today = Local::now().date_naive();
         match period {
@@ -995,7 +968,6 @@ impl FinancerApp {
                 (start, end)
             }
             Period::Weekly => {
-                // start at Monday of the current week
                 let weekday = today.weekday().num_days_from_monday() as i64;
                 let week_start = today - Duration::days(weekday) + Duration::weeks(offset as i64);
                 let start = week_start.and_hms_opt(0, 0, 0).unwrap();
@@ -1005,7 +977,6 @@ impl FinancerApp {
             Period::Monthly => {
                 let mut year = today.year();
                 let mut month = today.month() as i32;
-                // shift months by offset
                 let total_month = month - 1 + offset;
                 year += total_month.div_euclid(12);
                 month = (total_month.rem_euclid(12) + 1) as u32 as i32;
@@ -1026,15 +997,12 @@ impl FinancerApp {
         }
     }
 
-    // compute progress for all loaded budgets and store into self.budget_progress
     fn compute_budget_progress(&mut self, offset: i32) {
         self.budget_progress.clear();
         if let Some(uid) = self.user_id {
             for b in &self.budgets {
-                // Use each budget's own period, not the view filter period
                 let budget_period = Period::from_str(&b.period);
                 let (start, end) = Self::get_period_range(budget_period, offset);
-                // assumes db::get_spend_for_category_period returns sum in cents (i64)
                 match db::get_spend_for_category_period(&mut self.conn, uid, &b.category, start, end) {
                     Ok(spent_cents) => {
                         self.budget_progress.insert(b.id.unwrap_or(0), (spent_cents, b.limit_cents));
@@ -1060,13 +1028,11 @@ impl FinancerApp {
 
             ui.separator();
 
-            // Time navigation controls
             if ui.button("Prev").clicked() {
                 self.period_offset -= 1;
                 self.compute_budget_progress(self.period_offset);
             }
             
-            // Show current viewing status
             let offset_text = match self.period_offset {
                 0 => "Current Period".to_string(),
                 1 => "1 period ahead".to_string(),
@@ -1090,7 +1056,6 @@ impl FinancerApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Create Budget").clicked() {
-                    // open editor in create mode
                     self.current_editing = None;
                     self.editor_category.clear();
                     self.editor_limit_cents = 0;
@@ -1103,7 +1068,6 @@ impl FinancerApp {
 
         ui.separator();
 
-        // show list
         if self.budgets.is_empty() {
             ui.label("No budgets. Create one with the Create Budget button.");
         } else {
@@ -1114,7 +1078,6 @@ impl FinancerApp {
                     .cloned()
                     .unwrap_or((0, b.limit_cents));
 
-                // Calculate date range for this budget to display
                 let budget_period = crate::models::Period::from_str(&b.period);
                 let (start_date, end_date) = Self::get_period_range(budget_period, self.period_offset);
                 let date_range_str = format!(
@@ -1123,16 +1086,13 @@ impl FinancerApp {
                     end_date.format("%b %d, %Y")
                 );
 
-                // Interpret spent based on target type
                 let target_type = crate::models::TargetType::from_str(&b.target_type);
 
                 let spent_for_bar: f32 = match target_type {
                     crate::models::TargetType::Expense => {
-                        // expenses are stored as negative -> use absolute value
                         (raw_spent.abs()) as f32
                     }
                     crate::models::TargetType::Income => {
-                        // income is positive; if somehow negative, treat as 0
                         raw_spent.max(0) as f32
                     }
                 };
@@ -1187,7 +1147,6 @@ impl FinancerApp {
         ui.separator();
         ui.heading("Quick Create Budget");
         
-        // Category dropdown with custom option
         ui.horizontal(|ui| {
             ui.label("Category:");
             let all_categories = self.get_all_categories();
@@ -1205,7 +1164,6 @@ impl FinancerApp {
                 });
         });
 
-        // Custom category input
         if self.show_category_input {
             ui.horizontal(|ui| {
                 ui.label("New Category:");
@@ -1259,7 +1217,6 @@ impl FinancerApp {
         ui.separator();
         ui.heading("Charts");
 
-        // Use ui.columns outside of a horizontal layout
         ui.columns(2, |cols| {
             cols[0].vertical(|ui| {
                 self.show_expense_pie_chart(ui);
@@ -1271,15 +1228,12 @@ impl FinancerApp {
         });
     });
 
-    // Render editor window if requested
     if self.editor_open {
-        // current_editing == Some(id) -> editing that id; None -> create
         self.show_budget_editor(ctx, self.current_editing);
     }
 }
 
     fn show_budget_editor(&mut self, ctx: &egui::Context, editing: Option<i32>) {
-        // populate editor fields from selected budget (only if fields look "empty" to avoid overwriting while typing)
         if let Some(id) = editing {
             if let Some(b) = self.budgets.iter().find(|b| b.id.unwrap_or(-1) == id) {
                 if self.editor_category.is_empty() {
@@ -1294,7 +1248,6 @@ impl FinancerApp {
         }
 
         egui::Window::new("Budget Editor").resizable(false).show(ctx, |ui| {
-            // Category dropdown with custom option
             ui.horizontal(|ui| {
                 ui.label("Category:");
                 let all_categories = self.get_all_categories();
@@ -1312,7 +1265,6 @@ impl FinancerApp {
                     });
             });
 
-            // Custom category input
             if self.show_category_input {
                 ui.horizontal(|ui| {
                     ui.label("New Category:");
@@ -1331,7 +1283,6 @@ impl FinancerApp {
                 });
             }
 
-            // Limit in dollars
             ui.horizontal(|ui| {
                 ui.label("Limit ($):");
                 let mut limit_dollars = self.editor_limit_cents as f32 / 100.0;
@@ -1373,11 +1324,10 @@ impl FinancerApp {
                         if res.is_ok() {
                             self.load_user_budgets();
                             self.compute_budget_progress(0);
-                            // clear quick-editor
                             self.editor_category.clear();
                             self.editor_limit_cents = 0;
-                            self.editor_open = false; // add this
-                            self.current_editing = None; // add this
+                            self.editor_open = false;
+                            self.current_editing = None;
                         } else {
                             self.message = format!("Failed to save budget: {:?}", res.err());
                         }
@@ -1420,7 +1370,6 @@ impl FinancerApp {
             ui.separator();
             ui.heading("Add New Transaction");
 
-            // Account selector
             ui.horizontal(|ui| {
                 ui.label("Account:");
                 egui::ComboBox::from_id_source("tx_account_selector")
@@ -1438,14 +1387,12 @@ impl FinancerApp {
                     });
             });
 
-            // Amount and type
             ui.horizontal(|ui| {
                 ui.label("Amount:");
                 ui.add(egui::DragValue::new(&mut self.tx_amount).speed(1.0).prefix("$"));
                 ui.checkbox(&mut self.tx_is_expense, "Expense");
             });
 
-            // Category selector
             ui.horizontal(|ui| {
                 ui.label("Category:");
                 let all_categories = self.get_all_categories();
@@ -1463,7 +1410,6 @@ impl FinancerApp {
                     });
             });
 
-            // Custom category input
             if self.show_category_input {
                 ui.horizontal(|ui| {
                     ui.label("New Category:");
@@ -1482,21 +1428,17 @@ impl FinancerApp {
                 });
             }
 
-            // Date
             ui.horizontal(|ui| {
                 ui.label("Date:");
                 Self::show_date_selector(ui, &mut self.tx_date, "tx_date");
             });
 
-            // Submit button
             if ui.button("Add Transaction").clicked() {
                 if let Some(_uid) = self.user_id {
                     if self.tx_account_id > 0 && self.tx_amount > 0.0 {
-                        // Find the selected account
                         let account_opt = self.accounts_list.iter().find(|a| a.id == self.tx_account_id);
                         if let Some(account) = account_opt {
                             let amount = if self.tx_is_expense { -self.tx_amount } else { self.tx_amount };
-                            // Check for sufficient funds if expense
                             if self.tx_is_expense && account.balance < self.tx_amount {
                                 self.message = "Insufficient funds for this expense.".to_string();
                             } else {
@@ -1505,7 +1447,7 @@ impl FinancerApp {
                                 match db::create_transaction(
                                     &mut self.conn,
                                     self.tx_account_id,
-                                    0, // contact_id - not used
+                                    0,
                                     amount,
                                     self.tx_category.clone(),
                                     date_time,
@@ -1516,11 +1458,9 @@ impl FinancerApp {
                                         self.load_user_categories();
                                         self.load_user_budgets();
                                         self.compute_budget_progress(self.period_offset);
-                                        // Reload accounts to show updated balance
                                         if let Some(uid) = self.user_id {
                                             self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
                                         }
-                                        // Reset form
                                         self.tx_amount = 0.0;
                                         self.tx_is_expense = true;
                                     }
@@ -1550,7 +1490,6 @@ impl FinancerApp {
                         self.tx_filter_start_date.replace("-", ""),
                         self.tx_filter_end_date.replace("-", "")
                     );
-                    // Collect filtered transactions (same filter as below)
                     let filtered_transactions: Vec<&Transaction> = self.transactions_list
                         .iter()
                         .filter(|tx| {
@@ -1612,7 +1551,6 @@ impl FinancerApp {
                 }
             });            
             
-            // Filter section
             ui.horizontal(|ui| {
                 ui.heading("Transaction History");
             });
@@ -1659,17 +1597,14 @@ impl FinancerApp {
                     });
             });
             
-            // Date filter row
             ui.horizontal(|ui| {
                 ui.label("Filter by Date Range:");
                 
-                // From date selector
                 ui.label("From:");
                 Self::show_date_selector(ui, &mut self.tx_filter_start_date, "tx_filter_start");
                 
                 ui.separator();
                 
-                // To date selector
                 ui.label("To:");
                 Self::show_date_selector(ui, &mut self.tx_filter_end_date, "tx_filter_end");
                 
@@ -1685,7 +1620,6 @@ impl FinancerApp {
                 }
             });
 
-            // Transaction list with filtering
             let mut tx_to_edit: Option<Transaction> = None;
             let mut tx_to_delete: Option<i32> = None;
 
@@ -1705,9 +1639,8 @@ impl FinancerApp {
                             true
                         };
                         
-                        // Date filtering
                         let date_match = {
-                            let tx_date = &tx.date[..10]; // Extract YYYY-MM-DD from "YYYY-MM-DD HH:MM:SS"
+                            let tx_date = &tx.date[..10];
                             
                             let start_match = if !self.tx_filter_start_date.is_empty() {
                                 tx_date >= self.tx_filter_start_date.as_str()
@@ -1762,19 +1695,16 @@ impl FinancerApp {
                 }
             });
 
-            // Handle edit action
             if let Some(tx) = tx_to_edit {
                 self.tx_editing_id = Some(tx.id);
                 self.tx_editor_open = true;
                 self.tx_editor_account_id = tx.user_account_id;
                 self.tx_editor_amount = tx.amount.abs();
                 self.tx_editor_category = tx.category.clone();
-                // Extract just the date part (YYYY-MM-DD) from the full datetime string
                 self.tx_editor_date = tx.date[..10].to_string();
                 self.tx_editor_is_expense = tx.amount < 0.0;
             }
 
-            // Handle delete action
             if let Some(tx_id) = tx_to_delete {
                 if let Err(e) = db::delete_transaction(&mut self.conn, tx_id) {
                     self.message = format!("Error deleting transaction: {}", e);
@@ -1783,7 +1713,6 @@ impl FinancerApp {
                     self.load_user_budgets();
                     self.compute_budget_progress(self.period_offset);
 
-                    // Reload accounts to show updated balance
                     if let Some(uid) = self.user_id {
                         self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
                     }
@@ -1792,7 +1721,6 @@ impl FinancerApp {
             }
         });
         
-        // Render transaction editor if open
         if self.tx_editor_open {
             self.show_transaction_editor(ctx);
         }
@@ -1804,7 +1732,6 @@ impl FinancerApp {
         egui::Window::new("Edit Transaction")
             .collapsible(false)
             .show(ctx, |ui| {
-                // Account selector
                 ui.horizontal(|ui| {
                     ui.label("Account:");
                     egui::ComboBox::from_id_source("tx_editor_account_selector")
@@ -1822,7 +1749,6 @@ impl FinancerApp {
                         });
                 });
 
-                // Category selector
                 ui.horizontal(|ui| {
                     ui.label("Category:");
                     let all_categories = self.get_all_categories();
@@ -1835,14 +1761,12 @@ impl FinancerApp {
                         });
                 });
 
-                // Amount
                 ui.horizontal(|ui| {
                     ui.label("Amount:");
                     ui.add(egui::DragValue::new(&mut self.tx_editor_amount).speed(0.1));
                     ui.checkbox(&mut self.tx_editor_is_expense, "Expense");
                 });
 
-                // Date
                 ui.horizontal(|ui| {
                     ui.label("Date:");
                     Self::show_date_selector(ui, &mut self.tx_editor_date, "tx_editor_date");
@@ -1851,7 +1775,6 @@ impl FinancerApp {
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
                         if let Some(tx_id) = self.tx_editing_id {
-                            // Always use positive value for amount
                             let entered_amount = self.tx_editor_amount.abs();
                             let amount = if self.tx_editor_is_expense {
                                 -entered_amount
@@ -1862,7 +1785,6 @@ impl FinancerApp {
                             if entered_amount <= 0.0 {
                                 self.message = "Amount must be positive.".to_string();
                             } else {
-                                // Format date with time for database
                                 let date_time = format!("{} 00:00:00", self.tx_editor_date);
                                 
                                 match db::update_transaction(
@@ -1879,7 +1801,6 @@ impl FinancerApp {
                                         self.load_user_budgets();
                                         self.compute_budget_progress(self.period_offset);
 
-                                        // Reload accounts to show updated balance
                                         if let Some(uid) = self.user_id {
                                             self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
                                         }
@@ -1918,7 +1839,6 @@ impl FinancerApp {
             ui.separator();
             ui.heading("Create Transfer");
 
-            // From Account selector
             ui.horizontal(|ui| {
                 ui.label("From Account:");
                 egui::ComboBox::from_id_source("transfer_from_account")
@@ -1940,7 +1860,6 @@ impl FinancerApp {
                     });
             });
 
-            // To Account selector
             ui.horizontal(|ui| {
                 ui.label("To Account:");
                 egui::ComboBox::from_id_source("transfer_to_account")
@@ -1953,7 +1872,6 @@ impl FinancerApp {
                     )
                     .show_ui(ui, |ui| {
                         for account in &self.accounts_list {
-                            // Don't allow selecting the same account as source
                             if account.id != self.transfer_from_account_id {
                                 ui.selectable_value(
                                     &mut self.transfer_to_account_id,
@@ -1965,19 +1883,17 @@ impl FinancerApp {
                     });
             });
 
-            // Amount
+
             ui.horizontal(|ui| {
                 ui.label("Amount:");
                 ui.add(egui::DragValue::new(&mut self.transfer_amount).speed(1.0).prefix("$"));
             });
 
-            // Date
             ui.horizontal(|ui| {
                 ui.label("Date:");
                 Self::show_date_selector(ui, &mut self.transfer_date, "transfer_date");
             });
 
-            // Transfer button
             if ui.button("Execute Transfer").clicked() {
                 if self.transfer_from_account_id > 0 
                     && self.transfer_to_account_id > 0 
@@ -2002,12 +1918,10 @@ impl FinancerApp {
                             self.load_user_budgets();
                             self.compute_budget_progress(self.period_offset);
                             
-                            // Reload accounts to show updated balances
                             if let Some(uid) = self.user_id {
                                 self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
                             }
                             
-                            // Reset form
                             self.transfer_amount = 0.0;
                         }
                         Err(e) => {
@@ -2031,14 +1945,13 @@ impl FinancerApp {
                         self.transfer_filter_start_date.replace("-", ""),
                         self.transfer_filter_end_date.replace("-", "")
                     );
-                    // Collect filtered transfers (same filter as below)
                     let filtered_transfers: Vec<&Transaction> = self.transactions_list
                         .iter()
                         .filter(|tx| {
                             if tx.category != "Transfer" {
                                 return false;
                             }
-                            let tx_date = &tx.date[..10]; // Extract YYYY-MM-DD
+                            let tx_date = &tx.date[..10];
                             let start_match = if !self.transfer_filter_start_date.is_empty() {
                                 tx_date >= self.transfer_filter_start_date.as_str()
                             } else {
@@ -2056,7 +1969,6 @@ impl FinancerApp {
                     let mut wtr = csv::Writer::from_path(&file_path);
                     match wtr {
                         Ok(mut writer) => {
-                            // Write header
                             let _ = writer.write_record(&[
                                 "account_name", "amount", "category", "date", "balance_after"
                             ]);
@@ -2087,17 +1999,14 @@ impl FinancerApp {
             ui.separator();
             ui.heading("Transfer History");
             
-            // Date filter for transfers
             ui.horizontal(|ui| {
                 ui.label("Filter by Date Range:");
                 
-                // From date selector
                 ui.label("From:");
                 Self::show_date_selector(ui, &mut self.transfer_filter_start_date, "transfer_filter_start");
                 
                 ui.separator();
                 
-                // To date selector
                 ui.label("To:");
                 Self::show_date_selector(ui, &mut self.transfer_filter_end_date, "transfer_filter_end");
                 
@@ -2113,7 +2022,6 @@ impl FinancerApp {
                 }
             });
 
-            // Show only Transfer transactions
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let transfer_transactions: Vec<&Transaction> = self.transactions_list
                     .iter()
@@ -2122,8 +2030,7 @@ impl FinancerApp {
                             return false;
                         }
                         
-                        // Date filtering
-                        let tx_date = &tx.date[..10]; // Extract YYYY-MM-DD
+                        let tx_date = &tx.date[..10];
                         
                         let start_match = if !self.transfer_filter_start_date.is_empty() {
                             tx_date >= self.transfer_filter_start_date.as_str()
