@@ -585,6 +585,20 @@ impl FinancerApp {
                     egui::Color32::from_rgb(199, 199, 199),
                 ];
 
+                // Special-case a single slice: the wedge polygon becomes invalid/non-convex when
+                // trying to represent a full circle using `convex_polygon` with the center point.
+                if category_totals.len() == 1 {
+                    painter.circle_filled(center, radius, colors[0]);
+                    painter.text(
+                        center,
+                        egui::Align2::CENTER_CENTER,
+                        "100%",
+                        egui::FontId::proportional(12.0),
+                        egui::Color32::BLACK,
+                    );
+                    return;
+                }
+
                 let mut start_angle = 0.0_f32;
                 for (i, (_, amount)) in category_totals.iter().enumerate() {
                     let proportion = *amount / total;
@@ -1079,6 +1093,7 @@ impl FinancerApp {
         self.load_user_transactions();
         use egui::Color32;
         egui::CentralPanel::default().show(ctx, |ui| {
+        egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
         ui.heading("Budgets");
 
         ui.horizontal(|ui| {
@@ -1286,6 +1301,7 @@ impl FinancerApp {
                 self.show_income_line_chart(ui);
             });
         });
+        });
     });
 
     if self.editor_open {
@@ -1402,6 +1418,10 @@ impl FinancerApp {
                             if db::delete_budget(&mut self.conn, id).is_ok() {
                                 self.load_user_budgets();
                                 self.compute_budget_progress(0);
+                                self.editor_category.clear();
+                                self.editor_limit_cents = 0;
+                                self.editor_open = false;
+                                self.current_editing = None;
                             } else {
                                 self.message = "Failed to delete budget.".to_string();
                             }
