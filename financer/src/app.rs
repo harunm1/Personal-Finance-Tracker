@@ -15,6 +15,10 @@ use crate::finance_calculations::{
     PaymentFrequency,
     mortgage_payment_with_frequency,
     mortgage_amortization_schedule_with_frequency,
+    simple_interest_future_value,
+    compound_interest_future_value_with_contributions,
+    ContributionFrequency,
+    CompoundingFrequency,
 };
 use egui_plot::{Plot, Line, Text as PlotText};
 use std::collections::HashMap;
@@ -52,6 +56,29 @@ pub enum AppState {
     CashflowTools,
     BondTools,
     MortgageTools,
+    SavingsCalculator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SavingsHorizonUnit {
+    Months,
+    Years,
+}
+
+impl SavingsHorizonUnit {
+    fn label(self) -> &'static str {
+        match self {
+            SavingsHorizonUnit::Months => "Months",
+            SavingsHorizonUnit::Years => "Years",
+        }
+    }
+
+    fn to_years(self, value: f64) -> f64 {
+        match self {
+            SavingsHorizonUnit::Months => value / 12.0,
+            SavingsHorizonUnit::Years => value,
+        }
+    }
 }
 #[derive(Serialize, Deserialize, Clone)]
 struct CashflowScenario {
@@ -166,6 +193,22 @@ pub struct FinancerApp {
     // Mortgage tools state (dynamic scenarios)
     mortgage_scenarios: Vec<MortgageScenario>,
     mortgage_state_file: String,
+
+    // Savings calculator state
+    savings_simple_principal: f32,
+    savings_simple_rate_percent: f32,
+    savings_simple_horizon_value: f32,
+    savings_simple_horizon_unit: SavingsHorizonUnit,
+    savings_simple_fv: Option<f64>,
+
+    savings_comp_initial_investment: f32,
+    savings_comp_regular_addition: f32,
+    savings_comp_regular_addition_frequency: ContributionFrequency,
+    savings_comp_rate_percent: f32,
+    savings_comp_compounding_frequency: CompoundingFrequency,
+    savings_comp_horizon_value: f32,
+    savings_comp_horizon_unit: SavingsHorizonUnit,
+    savings_comp_fv: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -471,6 +514,22 @@ impl FinancerApp {
                 error: None,
             }],
             mortgage_state_file: MORTGAGE_STATE_FILE.to_string(),
+
+            // Savings calculator initialization
+            savings_simple_principal: 1000.0,
+            savings_simple_rate_percent: 5.0,
+            savings_simple_horizon_value: 5.0,
+            savings_simple_horizon_unit: SavingsHorizonUnit::Years,
+            savings_simple_fv: None,
+
+            savings_comp_initial_investment: 1000.0,
+            savings_comp_regular_addition: 100.0,
+            savings_comp_regular_addition_frequency: ContributionFrequency::Monthly,
+            savings_comp_rate_percent: 6.0,
+            savings_comp_compounding_frequency: CompoundingFrequency::Monthly,
+            savings_comp_horizon_value: 5.0,
+            savings_comp_horizon_unit: SavingsHorizonUnit::Years,
+            savings_comp_fv: None,
         }
     }
 
@@ -938,6 +997,9 @@ impl FinancerApp {
                 }
                 if ui.button("Cash Flow Tools").clicked() {
                     self.screen = AppState::CashflowTools;
+                }
+                if ui.button("Savings Calculator").clicked() {
+                    self.screen = AppState::SavingsCalculator;
                 }
             });
         });
@@ -1482,7 +1544,7 @@ impl FinancerApp {
             ui.separator();
 
             ui.horizontal(|ui| {
-                if ui.button("Export CSV").clicked() {
+                if ui.button("Export CSV Report").clicked() {
                     let file_path = format!(
                         "transactions_{}_to_{}.csv",
                         self.tx_filter_start_date.replace("-", ""),
@@ -1937,7 +1999,7 @@ impl FinancerApp {
             ui.label(&self.message);
 
             ui.horizontal(|ui| {
-                if ui.button("Export CSV").clicked() {
+                if ui.button("Export CSV Report").clicked() {
                     let file_path = format!(
                         "transfers_{}_to_{}.csv",
                         self.transfer_filter_start_date.replace("-", ""),
@@ -2761,6 +2823,218 @@ impl FinancerApp {
             }
         });
     }
+
+    fn show_savings_calculator(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Savings Calculator");
+
+            ui.horizontal(|ui| {
+                if ui.button("Back to Dashboard").clicked() {
+                    self.screen = AppState::Dashboard;
+                }
+            });
+
+            ui.separator();
+
+            ui.group(|ui| {
+                ui.heading("Simple Interest");
+
+                ui.horizontal(|ui| {
+                    ui.label("Principal:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_simple_principal)
+                            .clamp_range(0.0..=1.0e12)
+                            .speed(10.0),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Interest rate (%):");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_simple_rate_percent)
+                            .clamp_range(0.0..=100.0)
+                            .speed(0.1),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Time horizon:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_simple_horizon_value)
+                            .clamp_range(0.0..=1.0e6)
+                            .speed(1.0),
+                    );
+                    egui::ComboBox::from_id_source("savings_simple_horizon_unit")
+                        .selected_text(self.savings_simple_horizon_unit.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.savings_simple_horizon_unit,
+                                SavingsHorizonUnit::Months,
+                                "Months",
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_simple_horizon_unit,
+                                SavingsHorizonUnit::Years,
+                                "Years",
+                            );
+                        });
+                });
+
+                if ui.button("Calculate").clicked() {
+                    let years = self
+                        .savings_simple_horizon_unit
+                        .to_years(self.savings_simple_horizon_value as f64);
+                    let fv = simple_interest_future_value(
+                        self.savings_simple_principal as f64,
+                        (self.savings_simple_rate_percent as f64) / 100.0,
+                        years,
+                    );
+                    self.savings_simple_fv = Some(fv);
+                }
+
+                if let Some(fv) = self.savings_simple_fv {
+                    ui.label(format!("Future value: ${:.2}", fv));
+                }
+            });
+
+            ui.separator();
+
+            ui.group(|ui| {
+                ui.heading("Compound Interest");
+
+                ui.horizontal(|ui| {
+                    ui.label("Initial investment:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_comp_initial_investment)
+                            .clamp_range(0.0..=1.0e12)
+                            .speed(10.0),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Regular addition:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_comp_regular_addition)
+                            .clamp_range(0.0..=1.0e12)
+                            .speed(10.0),
+                    );
+                    egui::ComboBox::from_id_source("savings_comp_regular_addition_frequency")
+                        .selected_text(self.savings_comp_regular_addition_frequency.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.savings_comp_regular_addition_frequency,
+                                ContributionFrequency::Weekly,
+                                ContributionFrequency::Weekly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_regular_addition_frequency,
+                                ContributionFrequency::BiWeekly,
+                                ContributionFrequency::BiWeekly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_regular_addition_frequency,
+                                ContributionFrequency::Monthly,
+                                ContributionFrequency::Monthly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_regular_addition_frequency,
+                                ContributionFrequency::Yearly,
+                                ContributionFrequency::Yearly.label(),
+                            );
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Interest rate (%):");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_comp_rate_percent)
+                            .clamp_range(0.0..=100.0)
+                            .speed(0.1),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Compounded:");
+                    egui::ComboBox::from_id_source("savings_comp_compounding_frequency")
+                        .selected_text(self.savings_comp_compounding_frequency.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Annually,
+                                CompoundingFrequency::Annually.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::SemiAnnually,
+                                CompoundingFrequency::SemiAnnually.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Quarterly,
+                                CompoundingFrequency::Quarterly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Monthly,
+                                CompoundingFrequency::Monthly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Weekly,
+                                CompoundingFrequency::Weekly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Daily,
+                                CompoundingFrequency::Daily.label(),
+                            );
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Time horizon:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_comp_horizon_value)
+                            .clamp_range(0.0..=1.0e6)
+                            .speed(1.0),
+                    );
+                    egui::ComboBox::from_id_source("savings_comp_horizon_unit")
+                        .selected_text(self.savings_comp_horizon_unit.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.savings_comp_horizon_unit,
+                                SavingsHorizonUnit::Months,
+                                "Months",
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_horizon_unit,
+                                SavingsHorizonUnit::Years,
+                                "Years",
+                            );
+                        });
+                });
+
+                if ui.button("Calculate").clicked() {
+                    let years = self
+                        .savings_comp_horizon_unit
+                        .to_years(self.savings_comp_horizon_value as f64);
+                    let fv = compound_interest_future_value_with_contributions(
+                        self.savings_comp_initial_investment as f64,
+                        self.savings_comp_regular_addition as f64,
+                        self.savings_comp_regular_addition_frequency,
+                        (self.savings_comp_rate_percent as f64) / 100.0,
+                        self.savings_comp_compounding_frequency,
+                        years,
+                    );
+                    self.savings_comp_fv = Some(fv);
+                }
+
+                if let Some(fv) = self.savings_comp_fv {
+                    ui.label(format!("Future value: ${:.2}", fv));
+                }
+            });
+        });
+    }
 }
 
 impl eframe::App for FinancerApp {
@@ -2775,6 +3049,7 @@ impl eframe::App for FinancerApp {
             AppState::CashflowTools => self.show_cashflow_tools(ctx),
             AppState::BondTools => self.show_bond_tools(ctx),
             AppState::MortgageTools => self.show_mortgage_tools(ctx),
+            AppState::SavingsCalculator => self.show_savings_calculator(ctx),
         }
     }
 }

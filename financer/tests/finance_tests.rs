@@ -11,6 +11,10 @@ mod tests {
         mortgage_monthly_payment,
         mortgage_amortization_schedule_with_frequency,
         PaymentFrequency,
+        simple_interest_future_value,
+        compound_interest_future_value_with_contributions,
+        ContributionFrequency,
+        CompoundingFrequency,
     };
 
     #[test]
@@ -88,5 +92,71 @@ mod tests {
 
         // Accelerated weekly should result in less total interest, hence lower total paid.
         assert!(total_accel < total_weekly);
+    }
+
+    #[test]
+    fn test_simple_interest_future_value() {
+        let fv = simple_interest_future_value(1000.0, 0.05, 3.0);
+        assert!((fv - 1150.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_compound_interest_matches_future_value_without_contributions() {
+        let pv = 1234.56;
+        let annual_rate = 0.07;
+        let years = 8.0;
+        let fv_expected = future_value(pv, annual_rate, years, 12);
+        let fv = compound_interest_future_value_with_contributions(
+            pv,
+            0.0,
+            ContributionFrequency::Monthly,
+            annual_rate,
+            CompoundingFrequency::Monthly,
+            years,
+        );
+        assert!((fv - fv_expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_compound_interest_with_monthly_contributions_matches_closed_form_monthly() {
+        let initial: f64 = 1000.0;
+        let pmt: f64 = 100.0;
+        let annual_rate: f64 = 0.06;
+        let years: f64 = 2.0;
+
+        let i: f64 = annual_rate / 12.0;
+        let n: f64 = (years * 12.0).round();
+        let fv_expected: f64 = initial * (1.0 + i).powf(n)
+            + pmt * (((1.0 + i).powf(n) - 1.0) / i);
+
+        let fv = compound_interest_future_value_with_contributions(
+            initial,
+            pmt,
+            ContributionFrequency::Monthly,
+            annual_rate,
+            CompoundingFrequency::Monthly,
+            years,
+        );
+
+        assert!((fv - fv_expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_compound_interest_zero_rate_is_principal_plus_contributions() {
+        let initial = 500.0;
+        let pmt = 25.0;
+        let years = 2.0;
+        let expected = initial + pmt * 24.0;
+
+        let fv = compound_interest_future_value_with_contributions(
+            initial,
+            pmt,
+            ContributionFrequency::Monthly,
+            0.0,
+            CompoundingFrequency::Monthly,
+            years,
+        );
+
+        assert!((fv - expected).abs() < 1e-9);
     }
 }
