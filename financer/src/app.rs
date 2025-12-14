@@ -917,13 +917,44 @@ impl FinancerApp {
                 ui.label("No accounts found. Please create one.");
             } else {
                 let mut clicked_account_id: Option<i32> = None;
+                let mut delete_account_id: Option<i32> = None;
                 
                 for account in &self.accounts_list {
                     ui.horizontal(|ui| {
                         if ui.button(format!("{} - {}: ${:.2}", account.name, account.account_type, account.balance)).clicked() {
                             clicked_account_id = Some(account.id);
                         }
+
+                        if ui.button("Delete").clicked() {
+                            delete_account_id = Some(account.id);
+                        }
                     });
+                }
+
+                if let Some(account_id) = delete_account_id {
+                    if let Some(uid) = self.user_id {
+                        match db::delete_account(&mut self.conn, uid, account_id) {
+                            Ok(_) => {
+                                self.message = "Account deleted.".to_string();
+                                self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                                if self.tx_filter_account_id == Some(account_id) {
+                                    self.tx_filter_account_id = None;
+                                }
+                                if self.tx_account_id == account_id {
+                                    self.tx_account_id = 0;
+                                }
+                                if self.transfer_from_account_id == account_id {
+                                    self.transfer_from_account_id = 0;
+                                }
+                                if self.transfer_to_account_id == account_id {
+                                    self.transfer_to_account_id = 0;
+                                }
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to delete account: {}", e);
+                            }
+                        }
+                    }
                 }
                 
                 if let Some(account_id) = clicked_account_id {
@@ -1003,6 +1034,9 @@ impl FinancerApp {
             ui.separator();
             ui.heading("Planning Tools");
             ui.horizontal(|ui| {
+                if ui.button("Savings Calculator").clicked() {
+                    self.screen = AppState::SavingsCalculator;
+                }
                 if ui.button("Bond Tools").clicked() {
                     self.screen = AppState::BondTools;
                 }
@@ -1011,9 +1045,6 @@ impl FinancerApp {
                 }
                 if ui.button("Cash Flow Tools").clicked() {
                     self.screen = AppState::CashflowTools;
-                }
-                if ui.button("Savings Calculator").clicked() {
-                    self.screen = AppState::SavingsCalculator;
                 }
             });
         });
@@ -2163,6 +2194,7 @@ impl FinancerApp {
 impl FinancerApp {
     fn show_cashflow_tools(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             ui.heading("Cash Flow Tools");
 
             ui.horizontal(|ui| {
@@ -2304,13 +2336,10 @@ impl FinancerApp {
             ui.separator();
 
             ui.heading("Cash Flow Scenarios");
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let count = self.cf_scenarios.len();
-                if count == 0 {
-                    ui.label("No scenarios defined.");
-                    return;
-                }
-
+            let count = self.cf_scenarios.len();
+            if count == 0 {
+                ui.label("No scenarios defined.");
+            } else {
                 let cols_count = count.min(3);
                 let can_delete = count > 1;
                 let mut to_delete: Option<usize> = None;
@@ -2345,7 +2374,7 @@ impl FinancerApp {
                         self.cf_scenarios.remove(idx);
                     }
                 }
-            });
+            }
 
             if ui.button("Compute PV & FV for all scenarios").clicked() {
                 let parsed_date = NaiveDate::parse_from_str(&self.cf_valuation_date, "%Y-%m-%d");
@@ -2486,11 +2515,13 @@ impl FinancerApp {
                     ));
                 }
             }
+            });
         });
     }
 
     fn show_bond_tools(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             ui.heading("Bond Tools");
 
             ui.horizontal(|ui| {
@@ -2536,67 +2567,65 @@ impl FinancerApp {
             if self.bond_scenarios.is_empty() {
                 ui.label("No bond scenarios defined.");
             } else {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let count = self.bond_scenarios.len();
-                    let cols_count = count.min(3);
-                    let can_delete = count > 1;
-                    let mut to_delete: Option<usize> = None;
-                    ui.columns(cols_count, |cols| {
-                        for (idx, scen) in self.bond_scenarios.iter_mut().enumerate() {
-                            let col = idx % cols_count;
-                            let mut delete_here = false;
-                            cols[col].group(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.heading(format!("Bond {}", scen.name));
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
-                                            delete_here = true;
-                                        }
-                                    });
+                let count = self.bond_scenarios.len();
+                let cols_count = count.min(3);
+                let can_delete = count > 1;
+                let mut to_delete: Option<usize> = None;
+                ui.columns(cols_count, |cols| {
+                    for (idx, scen) in self.bond_scenarios.iter_mut().enumerate() {
+                        let col = idx % cols_count;
+                        let mut delete_here = false;
+                        cols[col].group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.heading(format!("Bond {}", scen.name));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                        delete_here = true;
+                                    }
                                 });
-                                ui.horizontal(|ui| {
-                                    ui.label("Name:");
-                                    ui.text_edit_singleline(&mut scen.title);
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Face value ($):");
-                                    ui.add(egui::DragValue::new(&mut scen.face_value).speed(10.0));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Coupon rate (%):");
-                                    ui.add(egui::DragValue::new(&mut scen.coupon_percent).speed(0.1));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Yield to maturity (%):");
-                                    ui.add(egui::DragValue::new(&mut scen.ytm_percent).speed(0.1));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Years to maturity:");
-                                    ui.add(egui::DragValue::new(&mut scen.years_to_maturity).speed(0.5));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Payments per year:");
-                                    ui.add(egui::DragValue::new(&mut scen.payments_per_year).clamp_range(1..=12));
-                                });
-                                if let Some(ref err) = scen.error {
-                                    ui.colored_label(egui::Color32::RED, err);
-                                }
-                                if let Some(price) = scen.price {
-                                    ui.label(format!("Price: ${:.2}", price));
-                                }
                             });
-                            if delete_here {
-                                to_delete = Some(idx);
+                            ui.horizontal(|ui| {
+                                ui.label("Name:");
+                                ui.text_edit_singleline(&mut scen.title);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Face value ($):");
+                                ui.add(egui::DragValue::new(&mut scen.face_value).speed(10.0));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Coupon rate (%):");
+                                ui.add(egui::DragValue::new(&mut scen.coupon_percent).speed(0.1));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Yield to maturity (%):");
+                                ui.add(egui::DragValue::new(&mut scen.ytm_percent).speed(0.1));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Years to maturity:");
+                                ui.add(egui::DragValue::new(&mut scen.years_to_maturity).speed(0.5));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Payments per year:");
+                                ui.add(egui::DragValue::new(&mut scen.payments_per_year).clamp_range(1..=12));
+                            });
+                            if let Some(ref err) = scen.error {
+                                ui.colored_label(egui::Color32::RED, err);
                             }
-                        }
-                    });
-
-                    if let Some(idx) = to_delete {
-                        if self.bond_scenarios.len() > 1 {
-                            self.bond_scenarios.remove(idx);
+                            if let Some(price) = scen.price {
+                                ui.label(format!("Price: ${:.2}", price));
+                            }
+                        });
+                        if delete_here {
+                            to_delete = Some(idx);
                         }
                     }
                 });
+
+                if let Some(idx) = to_delete {
+                    if self.bond_scenarios.len() > 1 {
+                        self.bond_scenarios.remove(idx);
+                    }
+                }
             }
 
             if ui.button("Price All Bonds").clicked() {
@@ -2637,11 +2666,13 @@ impl FinancerApp {
             } else {
                 ui.label("Price bond scenarios to see a comparison.");
             }
+            });
         });
     }
 
     fn show_mortgage_tools(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             ui.heading("Mortgage Tools");
 
             ui.horizontal(|ui| {
@@ -2688,85 +2719,83 @@ impl FinancerApp {
             if self.mortgage_scenarios.is_empty() {
                 ui.label("No mortgage scenarios defined.");
             } else {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let count = self.mortgage_scenarios.len();
-                    let cols_count = count.min(3);
-                    let can_delete = count > 1;
-                    let mut to_delete: Option<usize> = None;
-                    ui.columns(cols_count, |cols| {
-                        for (idx, scen) in self.mortgage_scenarios.iter_mut().enumerate() {
-                            let col = idx % cols_count;
-                            let mut delete_here = false;
-                            cols[col].group(|ui| {
-                                ui.push_id(idx, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.heading(format!("Mortgage {}", scen.name));
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
-                                                delete_here = true;
-                                            }
-                                        });
+                let count = self.mortgage_scenarios.len();
+                let cols_count = count.min(3);
+                let can_delete = count > 1;
+                let mut to_delete: Option<usize> = None;
+                ui.columns(cols_count, |cols| {
+                    for (idx, scen) in self.mortgage_scenarios.iter_mut().enumerate() {
+                        let col = idx % cols_count;
+                        let mut delete_here = false;
+                        cols[col].group(|ui| {
+                            ui.push_id(idx, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.heading(format!("Mortgage {}", scen.name));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                            delete_here = true;
+                                        }
                                     });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Name:");
-                                        ui.text_edit_singleline(&mut scen.title);
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Principal ($):");
-                                        ui.add(egui::DragValue::new(&mut scen.principal).speed(1000.0));
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Annual rate (%):");
-                                        ui.add(egui::DragValue::new(&mut scen.annual_rate_percent).speed(0.1));
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Years:");
-                                        ui.add(egui::DragValue::new(&mut scen.years).speed(1.0));
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Payment frequency:");
-                                        egui::ComboBox::from_id_source(format!("mort_freq_{}_{}", idx, scen.name))
-                                            .selected_text(match scen.frequency {
-                                            PaymentFrequency::Monthly => "Monthly",
-                                            PaymentFrequency::BiWeekly => "Bi-weekly",
-                                            PaymentFrequency::Weekly => "Weekly",
-                                            PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
-                                            })
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(&mut scen.frequency, PaymentFrequency::Monthly, "Monthly");
-                                                ui.selectable_value(&mut scen.frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
-                                                ui.selectable_value(&mut scen.frequency, PaymentFrequency::Weekly, "Weekly");
-                                                ui.selectable_value(
-                                                    &mut scen.frequency,
-                                                    PaymentFrequency::AcceleratedWeekly,
-                                                    "Accelerated weekly",
-                                                );
-                                            });
-                                    });
-                                    if let Some(ref err) = scen.error {
-                                        ui.colored_label(egui::Color32::RED, err);
-                                    }
-                                    if let Some(p) = scen.payment_per_period {
-                                        ui.label(format!("Payment per period: ${:.2}", p));
-                                    }
-                                    if let (Some(t), Some(i)) = (scen.total_paid, scen.total_interest) {
-                                        ui.label(format!("Total paid: ${:.2}", t));
-                                        ui.label(format!("Total interest: ${:.2}", i));
-                                    }
                                 });
+                                ui.horizontal(|ui| {
+                                    ui.label("Name:");
+                                    ui.text_edit_singleline(&mut scen.title);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Principal ($):");
+                                    ui.add(egui::DragValue::new(&mut scen.principal).speed(1000.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Annual rate (%):");
+                                    ui.add(egui::DragValue::new(&mut scen.annual_rate_percent).speed(0.1));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Years:");
+                                    ui.add(egui::DragValue::new(&mut scen.years).speed(1.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Payment frequency:");
+                                    egui::ComboBox::from_id_source(format!("mort_freq_{}_{}", idx, scen.name))
+                                        .selected_text(match scen.frequency {
+                                        PaymentFrequency::Monthly => "Monthly",
+                                        PaymentFrequency::BiWeekly => "Bi-weekly",
+                                        PaymentFrequency::Weekly => "Weekly",
+                                        PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::Monthly, "Monthly");
+                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
+                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::Weekly, "Weekly");
+                                            ui.selectable_value(
+                                                &mut scen.frequency,
+                                                PaymentFrequency::AcceleratedWeekly,
+                                                "Accelerated weekly",
+                                            );
+                                        });
+                                });
+                                if let Some(ref err) = scen.error {
+                                    ui.colored_label(egui::Color32::RED, err);
+                                }
+                                if let Some(p) = scen.payment_per_period {
+                                    ui.label(format!("Payment per period: ${:.2}", p));
+                                }
+                                if let (Some(t), Some(i)) = (scen.total_paid, scen.total_interest) {
+                                    ui.label(format!("Total paid: ${:.2}", t));
+                                    ui.label(format!("Total interest: ${:.2}", i));
+                                }
                             });
-                            if delete_here {
-                                to_delete = Some(idx);
-                            }
-                        }
-                    });
-
-                    if let Some(idx) = to_delete {
-                        if self.mortgage_scenarios.len() > 1 {
-                            self.mortgage_scenarios.remove(idx);
+                        });
+                        if delete_here {
+                            to_delete = Some(idx);
                         }
                     }
                 });
+
+                if let Some(idx) = to_delete {
+                    if self.mortgage_scenarios.len() > 1 {
+                        self.mortgage_scenarios.remove(idx);
+                    }
+                }
             }
 
             if ui.button("Compute All Mortgages").clicked() {
@@ -2841,11 +2870,13 @@ impl FinancerApp {
                     label, interest
                 ));
             }
+            });
         });
     }
 
     fn show_savings_calculator(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             ui.heading("Savings Calculator");
 
             ui.horizontal(|ui| {
@@ -3052,6 +3083,7 @@ impl FinancerApp {
                 if let Some(fv) = self.savings_comp_fv {
                     ui.label(format!("Future value: ${:.2}", fv));
                 }
+            });
             });
         });
     }

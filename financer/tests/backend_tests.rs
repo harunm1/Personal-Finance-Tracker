@@ -105,6 +105,45 @@ mod tests {
     }
 
     #[test]
+    fn test_delete_account_hides_from_accounts_but_keeps_transactions() {
+        let mut conn = get_test_connection();
+        create_user(&mut conn, "delaccuser", "pass", None).unwrap();
+        let user_obj = get_userid_by_username(&mut conn, "delaccuser").unwrap();
+
+        create_account(&mut conn, "ToDelete", "bank", 100.0, user_obj.id).unwrap();
+        let accounts_before = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        assert_eq!(accounts_before.len(), 1);
+
+        create_contact(&mut conn, "Vendor", user_obj.id).unwrap();
+        let contact_id: i32 = contacts
+            .filter(name.eq("Vendor"))
+            .filter(user.eq(user_obj.id))
+            .select(id)
+            .first(&mut conn)
+            .unwrap();
+
+        create_transaction(
+            &mut conn,
+            accounts_before[0].id,
+            contact_id,
+            -10.0,
+            "Food".to_string(),
+            "2025-12-13 00:00:00".to_string(),
+        )
+        .unwrap();
+
+        let deleted = delete_account(&mut conn, user_obj.id, accounts_before[0].id).unwrap();
+        assert_eq!(deleted, 1);
+
+        let accounts_after = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        assert_eq!(accounts_after.len(), 0);
+
+        let txs = get_user_transactions(&mut conn, user_obj.id).unwrap();
+        assert_eq!(txs.len(), 1);
+        assert_eq!(txs[0].category, "Food");
+    }
+
+    #[test]
     fn test_verify_user() {
         let mut conn = get_test_connection();
         create_user(&mut conn, "verifyuser", "pass", None).unwrap();

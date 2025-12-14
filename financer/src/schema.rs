@@ -7,6 +7,7 @@ diesel::table! {
         account_type -> Text,
         balance -> Float,
         user_id -> Integer,
+        active -> Bool,
     }
 }
 

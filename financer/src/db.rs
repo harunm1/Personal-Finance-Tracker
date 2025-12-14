@@ -1,6 +1,7 @@
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::Error;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use crate::models::{User, NewUser, NewAccount, NewContact, NewTransaction, Account, Transaction};
 use crate::schema::users::dsl::*;
 use crate::schema::accounts::dsl::*;
@@ -14,9 +15,15 @@ use crate::models::{Budget, NewBudget};
 use chrono::NaiveDateTime;
 use diesel::dsl::sum;
 
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
+
 pub fn establish_connection() -> SqliteConnection {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
-    SqliteConnection::establish(&db_url).expect(&format!("Error connecting to {}", db_url))
+    let mut conn = SqliteConnection::establish(&db_url)
+        .expect(&format!("Error connecting to {}", db_url));
+    conn.run_pending_migrations(MIGRATIONS)
+        .expect("Failed to run database migrations");
+    conn
 }
 
 pub fn create_user(conn: &mut SqliteConnection, new_username: &str, new_password: &str, new_email: Option<&str>) -> Result<usize, Error> {
@@ -55,7 +62,20 @@ pub fn create_account(conn: &mut SqliteConnection, new_name: &str, new_account_t
 }
 
 pub fn get_user_accounts(conn: &mut SqliteConnection, owner_id: i32) -> Result<Vec<Account>, Error> {
-    accounts.filter(user_id.eq(owner_id)).load::<Account>(conn)
+    accounts
+        .filter(user_id.eq(owner_id))
+        .filter(active.eq(true))
+        .load::<Account>(conn)
+}
+
+pub fn delete_account(conn: &mut SqliteConnection, owner_id: i32, account_id: i32) -> Result<usize, Error> {
+    diesel::update(
+        accounts
+            .filter(crate::schema::accounts::dsl::id.eq(account_id))
+            .filter(crate::schema::accounts::dsl::user_id.eq(owner_id)),
+    )
+        .set(crate::schema::accounts::dsl::active.eq(false))
+        .execute(conn)
 }
 
 pub fn get_userid_by_username(conn: &mut SqliteConnection, search_username: &str) -> Result<User, Error> {

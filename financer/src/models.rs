@@ -60,6 +60,7 @@ pub struct Account {
     pub account_type: String,
     pub balance: f32,
     pub user_id: i32,
+    pub active: bool,
 }
 
 #[derive(Debug, Insertable)]
