@@ -72,6 +72,90 @@ mod tests {
     }
 
     #[test]
+    fn test_delete_user_removes_all_associated_data() {
+        use diesel::OptionalExtension;
+        use financer::schema::{accounts, budgets, contacts, transactions, users};
+
+        let mut conn = get_test_connection();
+
+        create_user(&mut conn, "deluser", "pass", Some("deluser@example.com")).unwrap();
+        let user_obj = get_userid_by_username(&mut conn, "deluser").unwrap();
+
+        create_account(&mut conn, "Checking", "bank", 100.0, user_obj.id).unwrap();
+        create_account(&mut conn, "Savings", "bank", 50.0, user_obj.id).unwrap();
+        let user_accounts = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        assert_eq!(user_accounts.len(), 2);
+        let account_ids: Vec<i32> = user_accounts.iter().map(|a| a.id).collect();
+
+        create_contact(&mut conn, "Alice", user_obj.id).unwrap();
+        let contact_row: (i32, String, i32) = contacts::table
+            .filter(contacts::name.eq("Alice"))
+            .filter(contacts::user.eq(user_obj.id))
+            .select((contacts::id, contacts::name, contacts::user))
+            .first(&mut conn)
+            .unwrap();
+
+        create_transaction(
+            &mut conn,
+            account_ids[0],
+            contact_row.0,
+            10.0,
+            "Food".to_string(),
+            "2025-12-01 00:00:00".to_string(),
+        )
+        .unwrap();
+
+        create_budget(
+            &mut conn,
+            NewBudget {
+                user_id: user_obj.id,
+                category: "Food".to_string(),
+                limit_cents: 50000,
+                period: "Monthly".to_string(),
+                target_type: "Expense".to_string(),
+            },
+        )
+        .unwrap();
+
+        delete_user_and_all_data(&mut conn, user_obj.id).unwrap();
+
+        let user_still_exists = users::table
+            .filter(users::id.eq(user_obj.id))
+            .first::<User>(&mut conn)
+            .optional()
+            .unwrap();
+        assert!(user_still_exists.is_none());
+
+        let remaining_accounts: Vec<(i32, i32)> = accounts::table
+            .filter(accounts::user_id.eq(user_obj.id))
+            .select((accounts::id, accounts::user_id))
+            .load(&mut conn)
+            .unwrap();
+        assert!(remaining_accounts.is_empty());
+
+        let remaining_contacts: Vec<(i32, i32)> = contacts::table
+            .filter(contacts::user.eq(user_obj.id))
+            .select((contacts::id, contacts::user))
+            .load(&mut conn)
+            .unwrap();
+        assert!(remaining_contacts.is_empty());
+
+        let remaining_budgets: Vec<i32> = budgets::table
+            .filter(budgets::user_id.eq(user_obj.id))
+            .select(budgets::user_id)
+            .load(&mut conn)
+            .unwrap();
+        assert!(remaining_budgets.is_empty());
+
+        let remaining_transactions: Vec<i32> = transactions::table
+            .filter(transactions::user_account_id.eq_any(&account_ids))
+            .select(transactions::id)
+            .load(&mut conn)
+            .unwrap();
+        assert!(remaining_transactions.is_empty());
+    }
+
+    #[test]
     fn test_create_transaction_and_get_user_transactions() {
         let mut conn = get_test_connection();
         create_user(&mut conn, "txuser", "pass", None).unwrap();

@@ -122,6 +122,7 @@ pub struct FinancerApp {
     password: String,
     email: String,
     message: String,
+    confirm_delete_user: bool,
     screen: AppState,
     conn: SqliteConnection,
     accounts_list: Vec<Account>,
@@ -417,6 +418,7 @@ impl FinancerApp {
             password: String::new(),
             email: String::new(),
             message: String::new(),
+            confirm_delete_user: false,
             screen: AppState::Login,
             conn,
             user_id: None,
@@ -850,6 +852,10 @@ impl FinancerApp {
                 self.message.clear();
             }
 
+            if ui.button("Exit Program").clicked() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+
             ui.separator();
             ui.label(&self.message)
         });
@@ -909,6 +915,58 @@ impl FinancerApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("FinanceR Dashboard");
             ui.label(format!("Logged in as: {}", self.username));
+
+            ui.horizontal(|ui| {
+                if ui.button("Logout").clicked() {
+                    self.screen = AppState::Login;
+                    self.username.clear();
+                    self.password.clear();
+                    self.user_id = None;
+                    self.accounts_list.clear();
+                    self.message.clear();
+                    self.confirm_delete_user = false;
+                }
+
+                if ui.button("Delete User").clicked() {
+                    self.confirm_delete_user = true;
+                }
+
+                if ui.button("Exit Program").clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+
+            if self.confirm_delete_user {
+                ui.horizontal(|ui| {
+                    ui.label("Confirm delete user?");
+
+                    if ui.button("Confirm Delete").clicked() {
+                        if let Some(uid) = self.user_id {
+                            match db::delete_user_and_all_data(&mut self.conn, uid) {
+                                Ok(()) => {
+                                    self.screen = AppState::Login;
+                                    self.username.clear();
+                                    self.password.clear();
+                                    self.email.clear();
+                                    self.user_id = None;
+                                    self.accounts_list.clear();
+                                    self.budgets.clear();
+                                    self.transactions_list.clear();
+                                    self.message = "User deleted.".to_string();
+                                }
+                                Err(e) => {
+                                    self.message = format!("Failed to delete user: {}", e);
+                                }
+                            }
+                        }
+                        self.confirm_delete_user = false;
+                    }
+
+                    if ui.button("Cancel").clicked() {
+                        self.confirm_delete_user = false;
+                    }
+                });
+            }
 
             ui.separator();
             ui.heading("Your Accounts:");
@@ -1002,15 +1060,6 @@ impl FinancerApp {
 
             ui.separator();
             ui.label(&self.message);
-
-            if ui.button("Logout").clicked() {
-                self.screen = AppState::Login;
-                self.username.clear();
-                self.password.clear();
-                self.user_id = None;
-                self.accounts_list.clear();
-                self.message.clear();
-            }
 
             if ui.button("Budgets").clicked() {
                 self.screen = AppState::Budgeting;

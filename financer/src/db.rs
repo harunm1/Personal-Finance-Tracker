@@ -68,6 +68,31 @@ pub fn get_user_accounts(conn: &mut SqliteConnection, owner_id: i32) -> Result<V
         .load::<Account>(conn)
 }
 
+pub fn delete_user_and_all_data(conn: &mut SqliteConnection, owner_id: i32) -> Result<(), Error> {
+    conn.transaction::<_, Error, _>(|conn| {
+        use crate::schema::{accounts, budgets, contacts, transactions, users};
+
+        let account_ids: Vec<i32> = accounts::table
+            .filter(accounts::user_id.eq(owner_id))
+            .select(accounts::id)
+            .load(conn)?;
+
+        if !account_ids.is_empty() {
+            diesel::delete(
+                transactions::table.filter(transactions::user_account_id.eq_any(&account_ids)),
+            )
+            .execute(conn)?;
+        }
+
+        diesel::delete(budgets::table.filter(budgets::user_id.eq(owner_id))).execute(conn)?;
+        diesel::delete(contacts::table.filter(contacts::user.eq(owner_id))).execute(conn)?;
+        diesel::delete(accounts::table.filter(accounts::user_id.eq(owner_id))).execute(conn)?;
+        diesel::delete(users::table.filter(users::id.eq(owner_id))).execute(conn)?;
+
+        Ok(())
+    })
+}
+
 pub fn delete_account(conn: &mut SqliteConnection, owner_id: i32, account_id: i32) -> Result<usize, Error> {
     diesel::update(
         accounts
