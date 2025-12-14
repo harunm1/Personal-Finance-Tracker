@@ -2,7 +2,6 @@
 
 use chrono::NaiveDate;
 use serde::{Serialize, Deserialize};
-use serde::{Deserialize, Serialize};
 
 pub fn real_rate(nominal_rate: f64, inflation_rate: f64) -> f64 {
     (1.0 + nominal_rate) / (1.0 + inflation_rate) - 1.0
