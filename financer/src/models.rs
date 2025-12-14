@@ -6,12 +6,14 @@ use super::schema::budgets;
 use diesel::{Insertable, Queryable};
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum AccountType {
     Checking,
     Savings,
 }
 
 #[derive(Debug, Clone, Queryable)]
+#[allow(dead_code)]
 pub struct Transaction {
     pub id: i32,
     pub user_account_id: i32,
@@ -36,6 +38,7 @@ pub struct NewTransaction {
 }
 
 #[derive(Debug, Queryable)]
+#[allow(dead_code)]
 pub struct Contact<'a> {
     pub id: i32,
     pub name: &'a str,
@@ -50,6 +53,7 @@ pub struct NewContact<'a> {
 }
  
 #[derive(Debug, Queryable)]
+#[allow(dead_code)]
 pub struct Account {
     pub id: i32,
     pub name: String,
@@ -67,6 +71,7 @@ pub struct NewAccount<'a> {
     pub user_id: i32,
 }
 #[derive(Debug, Queryable)]
+#[allow(dead_code)]
 pub struct User {
     pub id: i32,
     pub username: String,
@@ -106,7 +111,7 @@ impl Period {
             "Weekly" => Period::Weekly,
             "Monthly" => Period::Monthly,
             "Yearly" => Period::Yearly,
-            _ => Period::Monthly, // default
+            _ => Period::Monthly,
         }
     }
 }
@@ -130,13 +135,14 @@ impl TargetType {
         match s {
             "Expense" => TargetType::Expense,
             "Income" => TargetType::Income,
-            _ => TargetType::Expense, // default
+            _ => TargetType::Expense, 
         }
     }
 }
 
 
 #[derive(Debug, Queryable, Clone)]
+#[allow(dead_code)]
 pub struct Budget {
     pub id: Option<i32>, 
     pub user_id: i32,
