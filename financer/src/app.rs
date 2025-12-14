@@ -3,7 +3,7 @@ use eframe::egui::Ui;
 use crate::db;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::{Error, DatabaseErrorKind};
-use crate::models::{Account, Transaction};
+use crate::models::{Account, Transaction, RecurringTransaction, RecurringTransfer};
 use crate::models::{Budget, Period};
 use crate::finance_calculations::{
     real_rate,
@@ -27,6 +27,7 @@ use eframe::egui::Color32;
 use csv::Writer;
 use serde::{Serialize, Deserialize};
 use std::fs;
+use std::time::{Duration, Instant};
 
 const CASHFLOW_STATE_FILE: &str = "cashflow_state.json";
 const BOND_STATE_FILE: &str = "bond_state.json";
@@ -123,6 +124,7 @@ pub struct FinancerApp {
     email: String,
     message: String,
     confirm_delete_user: bool,
+    last_recurring_check: Option<Instant>,
     screen: AppState,
     conn: SqliteConnection,
     accounts_list: Vec<Account>,
@@ -169,6 +171,27 @@ pub struct FinancerApp {
     transfer_date: String,
     transfer_filter_start_date: String,
     transfer_filter_end_date: String,
+
+    // Recurring transactions
+    recurring_transactions_list: Vec<RecurringTransaction>,
+    recurring_tx_editing_id: Option<i32>,
+    recurring_tx_account_id: i32,
+    recurring_tx_amount: f32,
+    recurring_tx_is_expense: bool,
+    recurring_tx_category: String,
+    recurring_tx_custom_category: String,
+    recurring_tx_show_category_input: bool,
+    recurring_tx_next_run_at: String,
+    recurring_tx_frequency: Period,
+
+    // Recurring transfers
+    recurring_transfers_list: Vec<RecurringTransfer>,
+    recurring_transfer_editing_id: Option<i32>,
+    recurring_transfer_from_account_id: i32,
+    recurring_transfer_to_account_id: i32,
+    recurring_transfer_amount: f32,
+    recurring_transfer_next_run_at: String,
+    recurring_transfer_frequency: Period,
     // Cash-flow tools state (dynamic scenarios, dated entries)
     cf_nominal_rate_percent: f32,
     cf_inflation_rate_percent: f32,
@@ -419,6 +442,7 @@ impl FinancerApp {
             email: String::new(),
             message: String::new(),
             confirm_delete_user: false,
+            last_recurring_check: None,
             screen: AppState::Login,
             conn,
             user_id: None,
@@ -466,6 +490,25 @@ impl FinancerApp {
             transfer_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
             transfer_filter_start_date: chrono::Local::now().date_naive().with_day(1).unwrap().format("%Y-%m-%d").to_string(),
             transfer_filter_end_date: chrono::Local::now().date_naive().format("%Y-%m-%d").to_string(),
+
+            recurring_transactions_list: Vec::new(),
+            recurring_tx_editing_id: None,
+            recurring_tx_account_id: 0,
+            recurring_tx_amount: 0.0,
+            recurring_tx_is_expense: true,
+            recurring_tx_category: DEFAULT_CATEGORIES[0].to_string(),
+            recurring_tx_custom_category: String::new(),
+            recurring_tx_show_category_input: false,
+            recurring_tx_next_run_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            recurring_tx_frequency: Period::Monthly,
+
+            recurring_transfers_list: Vec::new(),
+            recurring_transfer_editing_id: None,
+            recurring_transfer_from_account_id: 0,
+            recurring_transfer_to_account_id: 0,
+            recurring_transfer_amount: 0.0,
+            recurring_transfer_next_run_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            recurring_transfer_frequency: Period::Monthly,
             // Cash-flow tools initialization
             cf_nominal_rate_percent: 5.0,
             cf_inflation_rate_percent: 2.0,
@@ -729,6 +772,48 @@ impl FinancerApp {
         }
     }
 
+    fn load_user_recurring_transactions(&mut self) {
+        if let Some(uid) = self.user_id {
+            self.recurring_transactions_list =
+                db::get_user_recurring_transactions(&mut self.conn, uid).unwrap_or_default();
+        } else {
+            self.recurring_transactions_list.clear();
+        }
+    }
+
+    fn load_user_recurring_transfers(&mut self) {
+        if let Some(uid) = self.user_id {
+            self.recurring_transfers_list =
+                db::get_user_recurring_transfers(&mut self.conn, uid).unwrap_or_default();
+        } else {
+            self.recurring_transfers_list.clear();
+        }
+    }
+
+    fn maybe_process_due_recurring(&mut self) {
+        let Some(uid) = self.user_id else { return; };
+
+        let should_check = match self.last_recurring_check {
+            None => true,
+            Some(t) => t.elapsed() >= Duration::from_secs(5),
+        };
+        if !should_check {
+            return;
+        }
+        self.last_recurring_check = Some(Instant::now());
+
+        let now = chrono::Local::now().naive_local();
+        let processed = db::process_due_recurring(&mut self.conn, uid, now).unwrap_or(0);
+        if processed > 0 {
+            self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+            self.load_user_transactions();
+            self.load_user_budgets();
+            self.compute_budget_progress(self.period_offset);
+            self.load_user_recurring_transactions();
+            self.load_user_recurring_transfers();
+        }
+    }
+
     fn load_user_categories(&mut self) {
         if let Some(uid) = self.user_id {
             self.user_categories = db::get_user_categories(&mut self.conn, uid).unwrap_or_default();
@@ -835,7 +920,10 @@ impl FinancerApp {
                     Ok(true) => {
                         self.user_id = db::get_userid_by_username(&mut self.conn, &self.username).ok().map(|u| u.id);
                         if let Some(uid) = self.user_id {
+                            let _ = db::process_due_recurring(&mut self.conn, uid, chrono::Local::now().naive_local());
                             self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                            self.load_user_recurring_transactions();
+                            self.load_user_recurring_transfers();
                         }
                         self.message.clear();
                         self.screen = AppState::Dashboard;
@@ -913,6 +1001,7 @@ impl FinancerApp {
 
     fn show_dashboard(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.maybe_process_due_recurring();
             ui.heading("FinanceR Dashboard");
             ui.label(format!("Logged in as: {}", self.username));
 
@@ -1020,6 +1109,7 @@ impl FinancerApp {
                     self.screen = AppState::Transactions;
                     self.load_user_transactions();
                     self.load_user_categories();
+                    self.load_user_recurring_transactions();
                 }
             }
 
@@ -1073,11 +1163,13 @@ impl FinancerApp {
                 self.screen = AppState::Transactions;
                 self.load_user_transactions();
                 self.load_user_categories();
+                self.load_user_recurring_transactions();
             }
 
             if ui.button("Transfers").clicked() {
                 self.screen = AppState::Transfers;
                 self.load_user_transactions();
+                self.load_user_recurring_transfers();
             }
 
             ui.separator();
@@ -1519,6 +1611,7 @@ impl FinancerApp {
 
     fn show_transactions(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.maybe_process_due_recurring();
             ui.heading("Transactions");
 
             ui.horizontal(|ui| {
@@ -1640,6 +1733,200 @@ impl FinancerApp {
 
             ui.separator();
             ui.label(&self.message);
+
+            ui.separator();
+            ui.heading("Recurring Transactions");
+
+            ui.horizontal(|ui| {
+                ui.label("Account:");
+                egui::ComboBox::from_id_source("rec_tx_account_selector")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.recurring_tx_account_id)
+                            .map(|a| a.name.as_str())
+                            .unwrap_or("Select Account"),
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            ui.selectable_value(&mut self.recurring_tx_account_id, account.id, &account.name);
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Amount:");
+                ui.add(egui::DragValue::new(&mut self.recurring_tx_amount).speed(1.0).prefix("$"));
+                ui.checkbox(&mut self.recurring_tx_is_expense, "Expense");
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Category:");
+                let all_categories = self.get_all_categories();
+                egui::ComboBox::from_id_source("rec_tx_category_selector")
+                    .selected_text(&self.recurring_tx_category)
+                    .show_ui(ui, |ui| {
+                        for cat in &all_categories {
+                            ui.selectable_value(&mut self.recurring_tx_category, cat.clone(), cat);
+                        }
+                        ui.separator();
+                        if ui
+                            .selectable_label(self.recurring_tx_show_category_input, "+ Add New Category")
+                            .clicked()
+                        {
+                            self.recurring_tx_show_category_input = true;
+                        }
+                    });
+            });
+
+            if self.recurring_tx_show_category_input {
+                ui.horizontal(|ui| {
+                    ui.label("New Category:");
+                    ui.text_edit_singleline(&mut self.recurring_tx_custom_category);
+                    if ui.button("Add").clicked() {
+                        if !self.recurring_tx_custom_category.is_empty() && self.user_categories.len() < 50 {
+                            self.recurring_tx_category = self.recurring_tx_custom_category.clone();
+                            self.recurring_tx_custom_category.clear();
+                            self.recurring_tx_show_category_input = false;
+                        }
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.recurring_tx_custom_category.clear();
+                        self.recurring_tx_show_category_input = false;
+                    }
+                });
+            }
+
+            ui.horizontal(|ui| {
+                ui.label("Next Run (YYYY-MM-DD HH:MM:SS):");
+                ui.text_edit_singleline(&mut self.recurring_tx_next_run_at);
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Frequency:");
+                egui::ComboBox::from_id_source("rec_tx_frequency")
+                    .selected_text(self.recurring_tx_frequency.to_str())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.recurring_tx_frequency, Period::Daily, "Daily");
+                        ui.selectable_value(&mut self.recurring_tx_frequency, Period::Weekly, "Weekly");
+                        ui.selectable_value(&mut self.recurring_tx_frequency, Period::Monthly, "Monthly");
+                        ui.selectable_value(&mut self.recurring_tx_frequency, Period::Yearly, "Yearly");
+                    });
+            });
+
+            let save_label = if self.recurring_tx_editing_id.is_some() {
+                "Update Recurring Transaction"
+            } else {
+                "Add Recurring Transaction"
+            };
+
+            if ui.button(save_label).clicked() {
+                if let Some(uid) = self.user_id {
+                    if self.recurring_tx_account_id <= 0 || self.recurring_tx_amount <= 0.0 {
+                        self.message = "Select an account and enter a positive amount.".to_string();
+                    } else if chrono::NaiveDateTime::parse_from_str(&self.recurring_tx_next_run_at, "%Y-%m-%d %H:%M:%S").is_err() {
+                        self.message = "Next Run must be in format YYYY-MM-DD HH:MM:SS".to_string();
+                    } else {
+                        let amount = if self.recurring_tx_is_expense {
+                            -self.recurring_tx_amount
+                        } else {
+                            self.recurring_tx_amount
+                        };
+
+                        let changes = crate::models::NewRecurringTransaction {
+                            user_id: uid,
+                            account_id: self.recurring_tx_account_id,
+                            contact_id: 0,
+                            amount,
+                            category: self.recurring_tx_category.clone(),
+                            next_run_at: self.recurring_tx_next_run_at.clone(),
+                            frequency: self.recurring_tx_frequency.to_str().to_string(),
+                        };
+
+                        let result = if let Some(item_id) = self.recurring_tx_editing_id {
+                            db::update_recurring_transaction(&mut self.conn, uid, item_id, changes).map(|_| ())
+                        } else {
+                            db::create_recurring_transaction(&mut self.conn, changes).map(|_| ())
+                        };
+
+                        match result {
+                            Ok(()) => {
+                                self.message = "Recurring transaction saved.".to_string();
+                                self.recurring_tx_editing_id = None;
+                                self.recurring_tx_amount = 0.0;
+                                self.recurring_tx_is_expense = true;
+                                self.recurring_tx_next_run_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                                self.load_user_recurring_transactions();
+                                self.load_user_categories();
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to save recurring transaction: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if self.recurring_transactions_list.is_empty() {
+                ui.label("No recurring transactions.");
+            } else {
+                let mut delete_id: Option<i32> = None;
+                let mut edit_item: Option<RecurringTransaction> = None;
+
+                for item in &self.recurring_transactions_list {
+                    let account_name = self
+                        .accounts_list
+                        .iter()
+                        .find(|a| a.id == item.account_id)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| format!("Account {}", item.account_id));
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "{} | {}${:.2} | {} | next: {} | {}",
+                            account_name,
+                            if item.amount < 0.0 { "-" } else { "+" },
+                            item.amount.abs(),
+                            item.category,
+                            item.next_run_at,
+                            item.frequency
+                        ));
+                        if ui.button("Edit").clicked() {
+                            edit_item = Some(item.clone());
+                        }
+                        if ui.button("Delete").clicked() {
+                            delete_id = Some(item.id);
+                        }
+                    });
+                }
+
+                if let Some(item) = edit_item {
+                    self.recurring_tx_editing_id = Some(item.id);
+                    self.recurring_tx_account_id = item.account_id;
+                    self.recurring_tx_is_expense = item.amount < 0.0;
+                    self.recurring_tx_amount = item.amount.abs();
+                    self.recurring_tx_category = item.category;
+                    self.recurring_tx_next_run_at = item.next_run_at;
+                    self.recurring_tx_frequency = Period::from_str(&item.frequency);
+                }
+
+                if let Some(item_id) = delete_id {
+                    if let Some(uid) = self.user_id {
+                        match db::delete_recurring_transaction(&mut self.conn, uid, item_id) {
+                            Ok(_) => {
+                                self.message = "Recurring transaction deleted.".to_string();
+                                self.load_user_recurring_transactions();
+                                if self.recurring_tx_editing_id == Some(item_id) {
+                                    self.recurring_tx_editing_id = None;
+                                }
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to delete recurring transaction: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
 
             ui.separator();
 
@@ -1988,6 +2275,7 @@ impl FinancerApp {
 
     fn show_transfers(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.maybe_process_due_recurring();
             ui.heading("Account Transfers");
 
             ui.horizontal(|ui| {
@@ -2097,6 +2385,188 @@ impl FinancerApp {
 
             ui.separator();
             ui.label(&self.message);
+
+            ui.separator();
+            ui.heading("Recurring Transfers");
+
+            ui.horizontal(|ui| {
+                ui.label("From Account:");
+                egui::ComboBox::from_id_source("rec_transfer_from")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.recurring_transfer_from_account_id)
+                            .map(|a| format!("{} (${:.2})", a.name, a.balance))
+                            .unwrap_or_else(|| "Select Account".to_string()),
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            ui.selectable_value(
+                                &mut self.recurring_transfer_from_account_id,
+                                account.id,
+                                format!("{} (${:.2})", account.name, account.balance),
+                            );
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("To Account:");
+                egui::ComboBox::from_id_source("rec_transfer_to")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.recurring_transfer_to_account_id)
+                            .map(|a| format!("{} (${:.2})", a.name, a.balance))
+                            .unwrap_or_else(|| "Select Account".to_string()),
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            if account.id != self.recurring_transfer_from_account_id {
+                                ui.selectable_value(
+                                    &mut self.recurring_transfer_to_account_id,
+                                    account.id,
+                                    format!("{} (${:.2})", account.name, account.balance),
+                                );
+                            }
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Amount:");
+                ui.add(egui::DragValue::new(&mut self.recurring_transfer_amount).speed(1.0).prefix("$"));
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Next Run (YYYY-MM-DD HH:MM:SS):");
+                ui.text_edit_singleline(&mut self.recurring_transfer_next_run_at);
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Frequency:");
+                egui::ComboBox::from_id_source("rec_transfer_frequency")
+                    .selected_text(self.recurring_transfer_frequency.to_str())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.recurring_transfer_frequency, Period::Daily, "Daily");
+                        ui.selectable_value(&mut self.recurring_transfer_frequency, Period::Weekly, "Weekly");
+                        ui.selectable_value(&mut self.recurring_transfer_frequency, Period::Monthly, "Monthly");
+                        ui.selectable_value(&mut self.recurring_transfer_frequency, Period::Yearly, "Yearly");
+                    });
+            });
+
+            let save_label = if self.recurring_transfer_editing_id.is_some() {
+                "Update Recurring Transfer"
+            } else {
+                "Add Recurring Transfer"
+            };
+
+            if ui.button(save_label).clicked() {
+                if let Some(uid) = self.user_id {
+                    if self.recurring_transfer_from_account_id <= 0
+                        || self.recurring_transfer_to_account_id <= 0
+                        || self.recurring_transfer_from_account_id == self.recurring_transfer_to_account_id
+                        || self.recurring_transfer_amount <= 0.0
+                    {
+                        self.message = "Select two different accounts and enter a positive amount.".to_string();
+                    } else if chrono::NaiveDateTime::parse_from_str(&self.recurring_transfer_next_run_at, "%Y-%m-%d %H:%M:%S").is_err() {
+                        self.message = "Next Run must be in format YYYY-MM-DD HH:MM:SS".to_string();
+                    } else {
+                        let changes = crate::models::NewRecurringTransfer {
+                            user_id: uid,
+                            from_account_id: self.recurring_transfer_from_account_id,
+                            to_account_id: self.recurring_transfer_to_account_id,
+                            amount: self.recurring_transfer_amount,
+                            next_run_at: self.recurring_transfer_next_run_at.clone(),
+                            frequency: self.recurring_transfer_frequency.to_str().to_string(),
+                        };
+
+                        let result = if let Some(item_id) = self.recurring_transfer_editing_id {
+                            db::update_recurring_transfer(&mut self.conn, uid, item_id, changes).map(|_| ())
+                        } else {
+                            db::create_recurring_transfer(&mut self.conn, changes).map(|_| ())
+                        };
+
+                        match result {
+                            Ok(()) => {
+                                self.message = "Recurring transfer saved.".to_string();
+                                self.recurring_transfer_editing_id = None;
+                                self.recurring_transfer_amount = 0.0;
+                                self.recurring_transfer_next_run_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                                self.load_user_recurring_transfers();
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to save recurring transfer: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if self.recurring_transfers_list.is_empty() {
+                ui.label("No recurring transfers.");
+            } else {
+                let mut delete_id: Option<i32> = None;
+                let mut edit_item: Option<RecurringTransfer> = None;
+
+                for item in &self.recurring_transfers_list {
+                    let from_name = self
+                        .accounts_list
+                        .iter()
+                        .find(|a| a.id == item.from_account_id)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| format!("Account {}", item.from_account_id));
+                    let to_name = self
+                        .accounts_list
+                        .iter()
+                        .find(|a| a.id == item.to_account_id)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| format!("Account {}", item.to_account_id));
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "{} -> {} | ${:.2} | next: {} | {}",
+                            from_name,
+                            to_name,
+                            item.amount,
+                            item.next_run_at,
+                            item.frequency
+                        ));
+                        if ui.button("Edit").clicked() {
+                            edit_item = Some(item.clone());
+                        }
+                        if ui.button("Delete").clicked() {
+                            delete_id = Some(item.id);
+                        }
+                    });
+                }
+
+                if let Some(item) = edit_item {
+                    self.recurring_transfer_editing_id = Some(item.id);
+                    self.recurring_transfer_from_account_id = item.from_account_id;
+                    self.recurring_transfer_to_account_id = item.to_account_id;
+                    self.recurring_transfer_amount = item.amount;
+                    self.recurring_transfer_next_run_at = item.next_run_at;
+                    self.recurring_transfer_frequency = Period::from_str(&item.frequency);
+                }
+
+                if let Some(item_id) = delete_id {
+                    if let Some(uid) = self.user_id {
+                        match db::delete_recurring_transfer(&mut self.conn, uid, item_id) {
+                            Ok(_) => {
+                                self.message = "Recurring transfer deleted.".to_string();
+                                self.load_user_recurring_transfers();
+                                if self.recurring_transfer_editing_id == Some(item_id) {
+                                    self.recurring_transfer_editing_id = None;
+                                }
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to delete recurring transfer: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
 
             ui.horizontal(|ui| {
                 if ui.button("Export CSV Report").clicked() {

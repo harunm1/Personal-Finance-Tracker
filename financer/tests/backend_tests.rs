@@ -12,6 +12,7 @@ mod tests {
     use financer::schema::contacts::dsl::*;
     use chrono::NaiveDate;
     use chrono::Duration;
+    use financer::models::{NewRecurringTransaction, NewRecurringTransfer, Period};
 
     pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
 
@@ -153,6 +154,100 @@ mod tests {
             .load(&mut conn)
             .unwrap();
         assert!(remaining_transactions.is_empty());
+    }
+
+    #[test]
+    fn test_process_due_recurring_creates_transactions_and_advances_schedule() {
+        use diesel::OptionalExtension;
+
+        let mut conn = get_test_connection();
+
+        create_user(&mut conn, "recuser", "pass", None).unwrap();
+        let user_obj = get_userid_by_username(&mut conn, "recuser").unwrap();
+
+        create_account(&mut conn, "Main", "bank", 100.0, user_obj.id).unwrap();
+        let account = get_user_accounts(&mut conn, user_obj.id).unwrap().pop().unwrap();
+
+        let now = chrono::NaiveDateTime::parse_from_str("2025-12-14 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let past = chrono::NaiveDateTime::parse_from_str("2025-12-13 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+
+        let _ = create_recurring_transaction(
+            &mut conn,
+            NewRecurringTransaction {
+                user_id: user_obj.id,
+                account_id: account.id,
+                contact_id: 0,
+                amount: -10.0,
+                category: "Food".to_string(),
+                next_run_at: past.format("%Y-%m-%d %H:%M:%S").to_string(),
+                frequency: Period::Daily.to_str().to_string(),
+            },
+        )
+        .unwrap();
+
+        let processed = process_due_recurring(&mut conn, user_obj.id, now).unwrap();
+        assert!(processed >= 1);
+
+        let txs = get_user_transactions(&mut conn, user_obj.id).unwrap();
+        assert!(txs.iter().any(|t| t.category == "Food"));
+
+        let updated_account = get_user_accounts(&mut conn, user_obj.id).unwrap().into_iter().find(|a| a.id == account.id).unwrap();
+        assert!(updated_account.balance <= 90.0);
+
+        let rec_list = get_user_recurring_transactions(&mut conn, user_obj.id).unwrap();
+        assert_eq!(rec_list.len(), 1);
+        let next = chrono::NaiveDateTime::parse_from_str(&rec_list[0].next_run_at, "%Y-%m-%d %H:%M:%S").unwrap();
+        assert!(next > now);
+    }
+
+    #[test]
+    fn test_process_due_recurring_creates_transfers_and_advances_schedule() {
+        use diesel::OptionalExtension;
+
+        let mut conn = get_test_connection();
+
+        create_user(&mut conn, "rectxfer", "pass", None).unwrap();
+        let user_obj = get_userid_by_username(&mut conn, "rectxfer").unwrap();
+
+        create_account(&mut conn, "A", "bank", 100.0, user_obj.id).unwrap();
+        create_account(&mut conn, "B", "bank", 0.0, user_obj.id).unwrap();
+        let accounts = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        let a_id = accounts.iter().find(|a| a.name == "A").unwrap().id;
+        let b_id = accounts.iter().find(|a| a.name == "B").unwrap().id;
+
+        let now = chrono::NaiveDateTime::parse_from_str("2025-12-14 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let past = chrono::NaiveDateTime::parse_from_str("2025-12-14 11:59:59", "%Y-%m-%d %H:%M:%S").unwrap();
+
+        let _ = create_recurring_transfer(
+            &mut conn,
+            NewRecurringTransfer {
+                user_id: user_obj.id,
+                from_account_id: a_id,
+                to_account_id: b_id,
+                amount: 25.0,
+                next_run_at: past.format("%Y-%m-%d %H:%M:%S").to_string(),
+                frequency: Period::Weekly.to_str().to_string(),
+            },
+        )
+        .unwrap();
+
+        let processed = process_due_recurring(&mut conn, user_obj.id, now).unwrap();
+        assert!(processed >= 1);
+
+        let txs = get_user_transactions(&mut conn, user_obj.id).unwrap();
+        let transfer_count = txs.iter().filter(|t| t.category == "Transfer").count();
+        assert!(transfer_count >= 2);
+
+        let updated = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        let a_bal = updated.iter().find(|a| a.id == a_id).unwrap().balance;
+        let b_bal = updated.iter().find(|a| a.id == b_id).unwrap().balance;
+        assert!(a_bal <= 75.0);
+        assert!(b_bal >= 25.0);
+
+        let rec_list = get_user_recurring_transfers(&mut conn, user_obj.id).unwrap();
+        assert_eq!(rec_list.len(), 1);
+        let next = chrono::NaiveDateTime::parse_from_str(&rec_list[0].next_run_at, "%Y-%m-%d %H:%M:%S").unwrap();
+        assert!(next > now);
     }
 
     #[test]

@@ -3,6 +3,8 @@ use super::schema::accounts;
 use super::schema::contacts;
 use super::schema::transactions;
 use super::schema::budgets;
+use super::schema::recurring_transactions;
+use super::schema::recurring_transfers;
 use diesel::{Insertable, Queryable};
 
 #[derive(Debug)]
@@ -163,4 +165,54 @@ pub struct NewBudget {
     pub limit_cents: i32,
     pub period: String,
     pub target_type: String,
+}
+
+#[derive(Debug, Clone, Queryable)]
+#[allow(dead_code)]
+pub struct RecurringTransaction {
+    pub id: i32,
+    pub user_id: i32,
+    pub account_id: i32,
+    pub contact_id: i32,
+    pub amount: f32,
+    pub category: String,
+    pub next_run_at: String,
+    pub frequency: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = recurring_transactions)]
+pub struct NewRecurringTransaction {
+    pub user_id: i32,
+    pub account_id: i32,
+    pub contact_id: i32,
+    pub amount: f32,
+    pub category: String,
+    pub next_run_at: String,
+    pub frequency: String,
+}
+
+#[derive(Debug, Clone, Queryable)]
+#[allow(dead_code)]
+pub struct RecurringTransfer {
+    pub id: i32,
+    pub user_id: i32,
+    pub from_account_id: i32,
+    pub to_account_id: i32,
+    pub amount: f32,
+    pub next_run_at: String,
+    pub frequency: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = recurring_transfers)]
+pub struct NewRecurringTransfer {
+    pub user_id: i32,
+    pub from_account_id: i32,
+    pub to_account_id: i32,
+    pub amount: f32,
+    pub next_run_at: String,
+    pub frequency: String,
 }
