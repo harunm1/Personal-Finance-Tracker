@@ -2,6 +2,8 @@
 
 # Video Slide Presentation
 
+https://youtu.be/mks1GqiE_1g
+
 # Video Demo
 
 # Final Report
@@ -182,7 +184,7 @@ It includes:
 
 Accounts represent financial containers such as chequing or savings accounts.
 
-![FinanceR Accounts Screen](images/Accounts.png)
+![FinanceR Accounts Screen](images/accounts.png)
 
 **To create a new account:**
 1. Enter an account **Name**
@@ -247,7 +249,7 @@ Click **Export CSV Report** to download a transaction report in CSV format.
 
 Open **Transfers** from the Dashboard to move funds between accounts.
 
-![FinanceR Transfers Screen](images/Transfers.png)
+![FinanceR Transfers Screen](images/transfers.png)
 
 #### Creating a Transfer
 
@@ -361,7 +363,7 @@ The Budgets screen includes visual summaries to aid financial insight:
 
 FinanceR includes planning utilities for long-term financial projections. The Bond, Mortgage, and Cash Flow tools support saving and loading scenarios via JSON files.
 
-![FinanceR Planning Tools Screen](images/PlanningTools.png)
+![FinanceR Planning Tools Screen](images/planningtools.png)
 
 ---
 
