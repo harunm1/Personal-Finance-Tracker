@@ -80,8 +80,327 @@ To meet these objectives, FinanceR will implement a well-defined set of features
 - Flexible reports: Users can generate reports based on account activity, income sources, or expense categories. Reports can be filtered by time period and granularity (daily, monthly, yearly).
 - Graphical summaries: The GUI will display pie charts for expense breakdowns, line charts for income trends, and comparative bar charts for budgets.
 
+---
 
 
+## User Guide
+
+### 1. Launching FinanceR
+FinanceR is a desktop GUI personal finance manager with secure user accounts and a local database backend.
+
+**To begin:**
+1. Run the FinanceR application.
+2. You will start on the **Login** screen.
+
+---
+
+### 2. Creating an Account (Registration)
+![FinanceR Registration Screen](images/registration.png)
+
+On the **FinanceR Registration** screen:
+1. Enter a **Username**
+2. Enter an **Email**
+3. Enter a **Password**
+4. Click **Create account**
+
+If successful, you can return to login via **Back to Login**.
+
+**Security note:** Passwords are not stored in plain text. FinanceR stores password hashes using a secure hashing algorithm.
+
+---
+
+### 3. Logging In
+![FinanceR Login Screen](images/login.png)
+
+On the **FinanceR Login** screen:
+1. Enter your **Username**
+2. Enter your **Password**
+3. Click **Login**
+
+If credentials are valid, you will be taken to the **Dashboard**.
+
+---
+
+### 4. Dashboard Overview and Navigation
+The **FinanceR Dashboard** is the home screen after login.
+
+![FinanceR Dashboard Screen](images/dashboard.png)
+
+
+It includes:
+- **Your Accounts**: a list of existing accounts and their balances.
+- **Create New Account**: create new accounts directly from the dashboard.
+- Navigation buttons:
+  - **Budgets**
+  - **Transactions**
+  - **Transfers**
+- **Planning Tools**
+  - **Bond Tools**
+  - **Mortgage Tools**
+  - **Cash Flow Tools**
+- **Logout** to return to the login screen.
+
+---
+
+### 5. Account Management
+Accounts represent financial containers such as checking or savings accounts.
+
+![FinanceR Accounts Screen](images/accounts.png)
+
+**To create a new account:**
+1. Enter an account **Name**
+2. Enter an account **Type** (e.g., Checking, Savings)
+3. Enter an initial **Balance**
+4. Click **Create Account**
+
+The account will immediately appear in **Your Accounts**, and its balance will be tracked automatically.
+
+---
+
+### 6. Transactions
+Open **Transactions** from the Dashboard to record income and expenses.
+
+![FinanceR Transactions Screen](images/transactions.png)
+
+#### Adding a Transaction
+1. Select an **Account**
+2. Enter an **Amount**
+3. Toggle **Expense** if the transaction is a cost (unchecked indicates income)
+4. Choose a **Category** (e.g., Food & Dining, Groceries, Income)
+5. Select a **Date**
+6. Click **Add Transaction**
+
+Account balances update automatically.
+
+#### Editing or Deleting Transactions
+Each transaction in the **Transaction History** includes:
+- **Edit**: modify transaction details
+- **Delete**: remove the transaction and revert its effect on balances
+
+#### Filtering Transactions
+Transaction history can be filtered by:
+- Account
+- Category
+- Date range
+- Quick filters: **This Month**, **All Time**
+
+#### Exporting Transactions
+Click **Export CSV** to download transaction data in CSV format.
+
+---
+
+### 7. Transfers
+Open **Transfers** from the Dashboard to move funds between accounts.
+
+![FinanceR Transfers Screen](images/transfers.png)
+
+
+#### Creating a Transfer
+1. Select a **From Account**
+2. Select a **To Account**
+3. Enter an **Amount**
+4. Choose a **Date**
+5. Click **Execute Transfer**
+
+Transfers update both account balances simultaneously.
+
+#### Transfer History and Export
+- View past transfers with date filtering
+- Export transfer history using **Export CSV**
+
+---
+
+### 8. Budgets
+Open **Budgets** from the Dashboard to track spending against category-based limits over configurable time periods.
+
+FinanceR supports both **quick budget creation** and **full budget configuration** using a dedicated budget editor.
+
+![FinanceR Budgets Screen](images/budgets.png)
+
+---
+
+#### Viewing Budgets
+Each existing budget displays:
+- Category name
+- Budget period (Daily, Weekly, Monthly, or Yearly)
+- Active date range
+- A progress bar showing **spent / limit**
+- Percentage of budget used
+- An **Edit** button
+
+You can navigate between time periods using:
+- **Prev**
+- **Current Period**
+- **Next**
+
+---
+
+#### Creating a Budget (Full Budget Editor)
+Click **Create Budget** to open the **Budget Editor** dialog.
+
+![FinanceR Creating a Budget Screen](images/createbudget.png)
+
+From the Budget Editor, users can:
+1. Select a **Category**
+2. Enter a **Spending Limit ($)**
+3. Choose a **Budget Period**:
+   - Daily
+   - Weekly
+   - Monthly
+   - Yearly
+4. Specify whether the budget applies to **Expenses** (expense budget toggle)
+5. Click **Save** to create the budget
+
+This method allows full control over the budget’s category, time scale, and spending constraints.
+
+---
+
+#### Quick Create Budget
+For faster setup, the **Quick Create Budget** section allows users to:
+1. Select a **Category**
+2. Enter a **Limit ($)**
+3. Click **Create**
+
+Quick-created budgets use default period settings and are useful for rapid setup.
+
+---
+
+#### Editing Budgets
+Click **Edit** next to any existing budget to reopen the **Budget Editor**, where users can:
+- Change the category
+- Adjust the spending limit
+- Modify the budget period (daily, weekly, monthly, yearly)
+- Save changes or close without saving
+
+Updates take effect immediately and refresh budget progress indicators.
+
+---
+
+#### Budget Charts
+The Budgets screen includes visual summaries to aid financial insight:
+- **Expense Breakdown** pie chart showing spending by category
+- **Income Progression** line chart illustrating income trends over the selected period
+
+
+---
+
+### 9. Planning Tools
+FinanceR includes planning utilities for long-term financial projections. All tools support saving and loading scenarios via JSON files.
+
+![FinanceR Planning Tools Screen](images/planningtools.png)
+
+---
+
+#### 9.1 Bond Tools
+The Bond Tools allow users to price fixed-income securities.
+
+![FinanceR Bond Tools Screen](images/bonds.png)
+
+**Workflow:**
+1. Specify a JSON file name (e.g., `bond_state.json`)
+2. Click **Load** to restore previous scenarios (optional)
+3. Click **Add Bond Scenario**
+4. Enter:
+   - Name
+   - Face value
+   - Coupon rate
+   - Yield to maturity
+   - Years to maturity
+   - Payments per year
+5. Click **Price All Bonds**
+
+Use **Save** to persist scenarios.
+
+---
+
+#### 9.2 Mortgage Tools
+Mortgage Tools compute payments and compare mortgage scenarios.
+
+![FinanceR Mortgage Tools Screen](images/mortgage.png)
+
+**Workflow:**
+1. Choose a JSON file (e.g., `mortgage_state.json`)
+2. Load existing scenarios (optional)
+3. Click **Add Mortgage Scenario**
+4. Enter:
+   - Name
+   - Principal
+   - Annual interest rate
+   - Term (years)
+   - Payment frequency
+5. Click **Compute All Mortgages**
+
+Scenarios can be saved and reloaded.
+
+---
+
+#### 9.3 Cash Flow Tools
+Cash Flow Tools support present/future value calculations and multi-cash-flow scenarios.
+
+![FinanceR Cash Flow Tools Screen](images/cashflow.png)
+
+**Inputs:**
+- Nominal annual interest rate
+- Inflation rate
+- Valuation date
+- Optional horizon date
+
+**Single Amount Calculation:**
+1. Enter amount, years, and compounding frequency
+2. Click **Compute single PV & FV**
+
+**Scenario-Based Cash Flows**
+
+Scenario-based cash flows allow users to evaluate the present and future value of multiple cash-flow streams under a common interest and inflation model. Each scenario represents an independent financial plan (e.g., salary payments, rent expenses, investment contributions).
+
+**Creating a Scenario**
+1. Click **Add Scenario** to create a new cash-flow scenario.
+2. Enter a descriptive **Scenario Name** to identify the plan.
+
+**Entering Cash Flows**
+- Cash flows are entered one per line using the format:'YYYY-MM-DD amount'
+- Positive values represent incoming cash (e.g., salary or investment returns).
+- Negative values represent outgoing cash (e.g., rent, expenses, loan payments).
+
+Example:
+```
+2025-01-01 3000
+2025-01-15 -1200
+2025-02-01 3000
+```
+
+**Quick Monthly Series Generator (Optional)**
+To simplify repetitive cash flows, such as monthly income or rent:
+1. Enter the **Monthly Amount**
+2. Specify a **Start Date**
+3. Select the **Number of Months**
+4. Choose the **Target Scenario**
+5. Click **Add series to selected**
+
+This automatically generates and appends a sequence of evenly spaced monthly cash flows to the selected scenario.
+
+**Computing Present and Future Values**
+Once all scenarios are defined:
+1. Click **Compute PV & FV for all scenarios**
+2. FinanceR discounts and compounds each cash flow using the specified:
+   - Nominal annual interest rate
+   - Inflation rate
+   - Valuation date
+3. The results table displays the **Present Value (PV)** and **Future Value (FV)** for each scenario, enabling direct comparison between alternative financial plans.
+
+
+---
+
+### 10. Common Usage Patterns
+- **Expense tracking**: Add transactions and review history
+- **Budget monitoring**: Set category limits and track progress
+- **Account management**: Transfer funds and monitor balances
+- **Financial planning**: Use bond, mortgage, and cash flow tools for projections
+
+---
+
+### 11. Logging Out
+Click **Logout** from the Dashboard to securely end your session and return to the login screen.
 
 ---
 
@@ -251,3 +570,69 @@ All commands must be executed from the project root directory (financer)
 [1] Best budgeting apps in Canada for 2025, https://money.ca/managing-money/budgeting/best-budget-apps-canada (accessed Oct. 5, 2025). 
 
 [2] Setting_tracker - crates.io: Rust package registry, https://crates.io/crates/setting_tracker (accessed Oct. 5, 2025).
+
+## Individual Contributions
+### Khantil Desai
+* Created the base structs for the core elements of the accounting model used in this project.
+    * Created the different structs and how they interacted with each other
+    * Implemented the basic functions to interact with those struct
+    * Ensured those classes worked well with the Object-Relational-Model (ORM) used in the code
+    * This unlocked all the work to bring the whole system together with the gui and add additional features around the accounting setup
+* Developed the financial planning features
+    * These features allow users to plan for different Bond, Mortgage, and Cash Flow scenarios, and were key features promised in the Proposal.
+    * Developed the functions for calculating Present Value (PV) and Future Value of a Bond
+    * Developed the functions for calculating PV and FV of a Cash Flow
+    * Developed the functions for calculating monthly payments for Mortgages
+    * Added Unit Tests for all the above functions
+    * Develop the GUI for these financial Tools as 3 separate pages
+* Developed the Savings Calculator feature
+    * This feature allows users to calculate a simple interest scenario as well as a compounding scenario to allow them to see how their savings will grow over time. 
+        * This was one of the key features promised in the proposal
+    * Implemented the Simple and Compound Interest functions
+    * Added tests for the Simple and Compound Interest functions
+    * Created a GUI for the Savings Calculator, as a new page in the app
+* Final clean up of the code and last-minute bug fixes
+    * Added the feature to delete a User
+    * Added the feature to delete an Account
+    * Added the feature to add and delete a recurring transaction or transfer
+    * Fixed the issue of parts of the Budget, and Financial Tools page not being visible by implementing a page-wide scroll functionality in the GUI
+
+### Mohammad Harun
+* Established the initial project structure and core application layout
+    * Designed the foundational code organization, including separation of database logic, application logic, and data models
+    * Defined common patterns and module boundaries that the rest of the team built upon
+    * Provided a stable foundation that enabled parallel development across the team
+* Implemented user authentication and profile management
+    * Designed and implemented user registration and login functionality
+    * Supported multi-user access with unique usernames and passwords
+    * ntegrated secure password handling using hashing and encryption techniques
+    * Implemented data validation and error handling for incorrect credentials and duplicate usernames
+* Developed the onboarding and login user experience
+    * Created a GUI login screen using egui
+    * Ensured smooth transitions between authentication states and the main application
+    * Implemented account creation and validation through the GUI
+* Implemented reporting and visualization features
+    * Developed report generation based on account activity, income sources, and expense categories
+    * Integrated graphical summaries into the GUI, including pie charts for expense breakdowns and line charts for income trends
+* Authored the Reproducibility Guide and project setup documentation
+* Coordinated team communication and integration efforts
+    * Organized and scheduled team meetings to track progress and resolve blockers
+    * Helped resolve merge conflicts and supported smooth feature integration
+    
+
+
+## Lessons Learned and Concluding Remarks
+The development of this project provided a deeply engaging and comprehensive learning experience, extending far beyond simply producing a working application. Building a personal finance tracker with a graphical user interface required careful consideration of multiple facets of software engineering, including system architecture, tooling choices, development methodology, data persistence, and team coordination. Throughout the project lifecycle, our team encountered numerous technical and organizational challenges that influenced the evolution of the system and shaped the lessons we learned. Integrating persistent storage, GUI elements, and application logic into a cohesive and maintainable system required balancing design flexibility with Rust’s strict compile-time safety guarantees, and this process reinforced the importance of deliberate planning, disciplined development practices, and thoughtful use of modern language features to achieve robust and reliable software. Reflecting on this experience highlights the value of careful architectural decisions, iterative validation, and conscious attention to maintainability, while also showcasing Rust’s strengths as a language for building high-performance and safe user-facing applications.  
+
+One of the most significant lessons concerned our approach to testing and development methodology. Our team did not adopt test-driven development during the early stages, opting instead to implement functionality first and introduce tests retrospectively. While this approach allowed for rapid initial development, it introduced additional complexity later when validating the system’s correctness. Writing tests after the fact revealed design shortcomings, including tightly coupled components, unclear module boundaries, and untested edge cases, which required extensive refactoring to address. For example, certain state-handling functions in the GUI relied on assumptions that were not easily decoupled for testing, necessitating the creation of additional abstractions to make the tests feasible. This experience reinforced that testing is not solely a verification mechanism but also an integral part of system design, encouraging modularity, clearer interfaces, and more deliberate architectural decisions. When combined with Rust’s strong type system, ownership model, and compile-time guarantees, adopting TDD from the beginning would likely have prevented a number of these issues, improved code correctness, and reduced technical debt, enhancing confidence in both individual components and the system as a whole. 
+
+A further lesson emerged from our experience with data modeling and database interactions. Leveraging an Object-Relational Mapping library to interface with a SQLite database greatly simplified the process of handling persistent data while also encouraging a clean and modular project structure. Expressing queries, schema definitions, and migrations directly in Rust reduced boilerplate code, allowed the compiler to catch errors early, and made the overall system easier to reason about. At the same time, our early decisions regarding core data models highlighted the importance of deliberate planning. Several Rust structs were initially defined to anticipate future features but ended up unused as the project evolved, necessitating the use of allow dead code annotations to suppress compiler warnings. This underscored the value of aligning planned models with actual system requirements and demonstrated that periodic review and refactoring of data structures is crucial to maintain clarity and reduce unnecessary complexity. Rust’s strict compiler feedback provided a continuous reminder of the need for intentional design and offered guidance for removing redundant abstractions, thereby reinforcing disciplined coding practices and emphasizing the balance between anticipating future needs and adhering to current functionality. 
+
+Working with Rust’s graphical user interface ecosystem, particularly through the egui library, proved to be another area of substantial learning. While Rust is often associated with systems programming or backend development, building a GUI application revealed its suitability for interactive, user-facing software. The immediate-mode GUI paradigm of egui integrated naturally with Rust’s ownership and borrowing model, allowing clear management of application state while ensuring memory safety. Handling user interactions, updating the interface dynamically, and maintaining consistent state across multiple components required careful attention to explicit data flow and state encapsulation. This experience emphasized the versatility of Rust and its ability to support performant applications without compromising safety or maintainability. It also reinforced software design principles such as separation of concerns, predictability in state transitions, and careful handling of mutable data, demonstrating that Rust can serve as a strong foundation for both low-level and high-level application development.  
+
+An additional lesson emerged from Rust’s ownership and borrowing system, which profoundly shaped our design choices and coding practices. Managing ownership of data structures and references, especially for GUI state updates and database interactions, initially added complexity but ultimately enforced safer and more predictable code. Rust prevented runtime errors such as use-after-free or unintended data races, which could have been common in other languages. We had to carefully handle mutable references across functions and closures, which encouraged clearer separation of responsibilities and more deliberate architectural decisions. Borrowing rules influenced function signatures, data passing, and struct design, promoting explicit state management and modularity. This lesson highlighted how Rust’s ownership model not only ensures memory safety but also acts as a design guide, shaping both the structure and quality of the software while encouraging maintainable, efficient, and robust implementations.  
+
+Finally, the project reinforced the critical importance of effective collaboration, time management, and adaptability in team-based development. Coordinating a three-person team with varying schedules presented challenges, and inconsistent meeting availability occasionally resulted in slower decision-making and missed internal milestones. Despite these difficulties, the team adapted by improving communication, breaking down tasks into smaller, manageable increments, and prioritizing integration of individual contributions. This experience illustrated that successful software development requires not only technical skill but also careful workflow planning, realistic milestone setting, and flexibility in responding to unexpected delays. These lessons—from testing strategies and data modeling to GUI design and team coordination—highlight the comprehensive skill set required to produce maintainable, performant software.  
+
+Looking forward, there are several areas where the project could be extended or improved to enhance functionality, performance, and maintainability. Adopting test-driven development from the outset could lead to cleaner, more modular code and reduce the risk of regressions. Refining data models and removing unused structs would simplify the codebase and make future feature expansion easier. Enhancements to the GUI could include more advanced user interactions, real-time visualizations of financial data, and improved accessibility, while performance profiling and optimization would ensure responsiveness for larger datasets. Expanding the application to support multi-platform deployment or cloud-backed synchronization could further demonstrate Rust’s versatility and prepare the system for real-world usage. Overall, these reflections demonstrate how the lessons learned, combined with Rust’s safety and performance guarantees, provide a solid foundation for future software projects.  
+
