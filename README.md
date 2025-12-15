@@ -6,6 +6,8 @@ https://youtu.be/mks1GqiE_1g
 
 # Video Demo
 
+https://youtu.be/JxMpz2psASU
+
 # Final Report
 
 ## Team Members
