@@ -1149,14 +1149,7 @@ impl FinancerApp {
             }
 
             ui.separator();
-            ui.label(&self.message);
-
-            if ui.button("Budgets").clicked() {
-                self.screen = AppState::Budgeting;
-                self.load_user_budgets();
-                self.load_user_categories();
-                self.compute_budget_progress(0);
-            }
+            ui.heading("Accounts and Activity");
 
             if ui.button("Transactions").clicked() {
                 self.tx_filter_account_id = None;
@@ -1170,6 +1163,13 @@ impl FinancerApp {
                 self.screen = AppState::Transfers;
                 self.load_user_transactions();
                 self.load_user_recurring_transfers();
+            }
+
+            if ui.button("Budgets").clicked() {
+                self.screen = AppState::Budgeting;
+                self.load_user_budgets();
+                self.load_user_categories();
+                self.compute_budget_progress(0);
             }
 
             ui.separator();
@@ -1188,6 +1188,8 @@ impl FinancerApp {
                     self.screen = AppState::CashflowTools;
                 }
             });
+
+            ui.label(&self.message);
         });
     }
 
