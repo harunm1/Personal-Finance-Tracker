@@ -683,6 +683,32 @@ All commands must be executed from the project root directory (financer)
     * Organized and scheduled team meetings to track progress and resolve blockers
     * Helped resolve merge conflicts and supported smooth feature integration
 
+### Vishnu Akundi
+* Developed the Account Management and Transaction Management features
+    * Implemented functionality for creating and managing multiple account types (checking, savings, credit cards)
+    * Designed and built the dashboard view to display consolidated account balances
+    * Created the transaction logging system, supporting income and expense entries with metadata
+    * Developed recurring transaction functionality for automatic updates
+    * Implemented editing, deletion, filtering, and exporting of transactions
+* Designed and implemented the Transfers feature
+    * Built the transfer system to move funds between accounts
+    * Ensured accurate balance updates for both source and destination accounts
+    * Added filtering capabilities for transfer history.
+* Developed the Budgeting and Expense Tracking features
+    * Created flexible budgeting tools with category-specific limits and time-based tracking
+    * Implemented both full budget editor and quick-create interfaces
+    * Developed progress indicators and period navigation for budgets
+    * Integrated charts for expense breakdown and income progression
+    * Ensured budgets updated dynamically based on transaction data
+    * Allowed for deletion and editing of budgets.
+* Wrote User Guide documentation
+    * Authored detailed instructions for using each feature of FinanceR
+    * Created screenshots and step-by-step workflows to assist users
+* Added to Key Features section in the README
+    * Documented the functionality and value of each major feature
+    * Ensured clarity and completeness for prospective users and developers
+
+
 ## Lessons Learned and Concluding Remarks
 
 The development of this project provided a deeply engaging and comprehensive learning experience, extending far beyond simply producing a working application. Building a personal finance tracker with a graphical user interface required careful consideration of multiple facets of software engineering, including system architecture, tooling choices, development methodology, data persistence, and team coordination. Throughout the project lifecycle, our team encountered numerous technical and organizational challenges that influenced the evolution of the system and shaped the lessons we learned. Integrating persistent storage, GUI elements, and application logic into a cohesive and maintainable system required balancing design flexibility with Rust’s strict compile-time safety guarantees, and this process reinforced the importance of deliberate planning, disciplined development practices, and thoughtful use of modern language features to achieve robust and reliable software. Reflecting on this experience highlights the value of careful architectural decisions, iterative validation, and conscious attention to maintainability, while also showcasing Rust’s strengths as a language for building high-performance and safe user-facing applications.  
