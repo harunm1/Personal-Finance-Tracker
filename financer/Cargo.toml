@@ -7,6 +7,7 @@ edition = "2024"
 eframe = "0.27"
 egui_plot = "0.27"
 diesel = { version = "2.3.3", features = ["sqlite"] }
+diesel_migrations = "2"
 argon2 = "0.5"
 password-hash = "0.5"
 rand = "0.8"
@@ -18,4 +19,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
-diesel_migrations = "2"
+

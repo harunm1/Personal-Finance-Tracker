@@ -12,6 +12,7 @@ mod tests {
     use financer::schema::contacts::dsl::*;
     use chrono::NaiveDate;
     use chrono::Duration;
+    use financer::models::{NewRecurringTransaction, NewRecurringTransfer, Period};
 
     pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
 
@@ -72,6 +73,184 @@ mod tests {
     }
 
     #[test]
+    fn test_delete_user_removes_all_associated_data() {
+        use diesel::OptionalExtension;
+        use financer::schema::{accounts, budgets, contacts, transactions, users};
+
+        let mut conn = get_test_connection();
+
+        create_user(&mut conn, "deluser", "pass", Some("deluser@example.com")).unwrap();
+        let user_obj = get_userid_by_username(&mut conn, "deluser").unwrap();
+
+        create_account(&mut conn, "Checking", "bank", 100.0, user_obj.id).unwrap();
+        create_account(&mut conn, "Savings", "bank", 50.0, user_obj.id).unwrap();
+        let user_accounts = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        assert_eq!(user_accounts.len(), 2);
+        let account_ids: Vec<i32> = user_accounts.iter().map(|a| a.id).collect();
+
+        create_contact(&mut conn, "Alice", user_obj.id).unwrap();
+        let contact_row: (i32, String, i32) = contacts::table
+            .filter(contacts::name.eq("Alice"))
+            .filter(contacts::user.eq(user_obj.id))
+            .select((contacts::id, contacts::name, contacts::user))
+            .first(&mut conn)
+            .unwrap();
+
+        create_transaction(
+            &mut conn,
+            account_ids[0],
+            contact_row.0,
+            10.0,
+            "Food".to_string(),
+            "2025-12-01 00:00:00".to_string(),
+        )
+        .unwrap();
+
+        create_budget(
+            &mut conn,
+            NewBudget {
+                user_id: user_obj.id,
+                category: "Food".to_string(),
+                limit_cents: 50000,
+                period: "Monthly".to_string(),
+                target_type: "Expense".to_string(),
+            },
+        )
+        .unwrap();
+
+        delete_user_and_all_data(&mut conn, user_obj.id).unwrap();
+
+        let user_still_exists = users::table
+            .filter(users::id.eq(user_obj.id))
+            .first::<User>(&mut conn)
+            .optional()
+            .unwrap();
+        assert!(user_still_exists.is_none());
+
+        let remaining_accounts: Vec<(i32, i32)> = accounts::table
+            .filter(accounts::user_id.eq(user_obj.id))
+            .select((accounts::id, accounts::user_id))
+            .load(&mut conn)
+            .unwrap();
+        assert!(remaining_accounts.is_empty());
+
+        let remaining_contacts: Vec<(i32, i32)> = contacts::table
+            .filter(contacts::user.eq(user_obj.id))
+            .select((contacts::id, contacts::user))
+            .load(&mut conn)
+            .unwrap();
+        assert!(remaining_contacts.is_empty());
+
+        let remaining_budgets: Vec<i32> = budgets::table
+            .filter(budgets::user_id.eq(user_obj.id))
+            .select(budgets::user_id)
+            .load(&mut conn)
+            .unwrap();
+        assert!(remaining_budgets.is_empty());
+
+        let remaining_transactions: Vec<i32> = transactions::table
+            .filter(transactions::user_account_id.eq_any(&account_ids))
+            .select(transactions::id)
+            .load(&mut conn)
+            .unwrap();
+        assert!(remaining_transactions.is_empty());
+    }
+
+    #[test]
+    fn test_process_due_recurring_creates_transactions_and_advances_schedule() {
+        use diesel::OptionalExtension;
+
+        let mut conn = get_test_connection();
+
+        create_user(&mut conn, "recuser", "pass", None).unwrap();
+        let user_obj = get_userid_by_username(&mut conn, "recuser").unwrap();
+
+        create_account(&mut conn, "Main", "bank", 100.0, user_obj.id).unwrap();
+        let account = get_user_accounts(&mut conn, user_obj.id).unwrap().pop().unwrap();
+
+        let now = chrono::NaiveDateTime::parse_from_str("2025-12-14 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let past = chrono::NaiveDateTime::parse_from_str("2025-12-13 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+
+        let _ = create_recurring_transaction(
+            &mut conn,
+            NewRecurringTransaction {
+                user_id: user_obj.id,
+                account_id: account.id,
+                contact_id: 0,
+                amount: -10.0,
+                category: "Food".to_string(),
+                next_run_at: past.format("%Y-%m-%d %H:%M:%S").to_string(),
+                frequency: Period::Daily.to_str().to_string(),
+            },
+        )
+        .unwrap();
+
+        let processed = process_due_recurring(&mut conn, user_obj.id, now).unwrap();
+        assert!(processed >= 1);
+
+        let txs = get_user_transactions(&mut conn, user_obj.id).unwrap();
+        assert!(txs.iter().any(|t| t.category == "Food"));
+
+        let updated_account = get_user_accounts(&mut conn, user_obj.id).unwrap().into_iter().find(|a| a.id == account.id).unwrap();
+        assert!(updated_account.balance <= 90.0);
+
+        let rec_list = get_user_recurring_transactions(&mut conn, user_obj.id).unwrap();
+        assert_eq!(rec_list.len(), 1);
+        let next = chrono::NaiveDateTime::parse_from_str(&rec_list[0].next_run_at, "%Y-%m-%d %H:%M:%S").unwrap();
+        assert!(next > now);
+    }
+
+    #[test]
+    fn test_process_due_recurring_creates_transfers_and_advances_schedule() {
+        use diesel::OptionalExtension;
+
+        let mut conn = get_test_connection();
+
+        create_user(&mut conn, "rectxfer", "pass", None).unwrap();
+        let user_obj = get_userid_by_username(&mut conn, "rectxfer").unwrap();
+
+        create_account(&mut conn, "A", "bank", 100.0, user_obj.id).unwrap();
+        create_account(&mut conn, "B", "bank", 0.0, user_obj.id).unwrap();
+        let accounts = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        let a_id = accounts.iter().find(|a| a.name == "A").unwrap().id;
+        let b_id = accounts.iter().find(|a| a.name == "B").unwrap().id;
+
+        let now = chrono::NaiveDateTime::parse_from_str("2025-12-14 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let past = chrono::NaiveDateTime::parse_from_str("2025-12-14 11:59:59", "%Y-%m-%d %H:%M:%S").unwrap();
+
+        let _ = create_recurring_transfer(
+            &mut conn,
+            NewRecurringTransfer {
+                user_id: user_obj.id,
+                from_account_id: a_id,
+                to_account_id: b_id,
+                amount: 25.0,
+                next_run_at: past.format("%Y-%m-%d %H:%M:%S").to_string(),
+                frequency: Period::Weekly.to_str().to_string(),
+            },
+        )
+        .unwrap();
+
+        let processed = process_due_recurring(&mut conn, user_obj.id, now).unwrap();
+        assert!(processed >= 1);
+
+        let txs = get_user_transactions(&mut conn, user_obj.id).unwrap();
+        let transfer_count = txs.iter().filter(|t| t.category == "Transfer").count();
+        assert!(transfer_count >= 2);
+
+        let updated = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        let a_bal = updated.iter().find(|a| a.id == a_id).unwrap().balance;
+        let b_bal = updated.iter().find(|a| a.id == b_id).unwrap().balance;
+        assert!(a_bal <= 75.0);
+        assert!(b_bal >= 25.0);
+
+        let rec_list = get_user_recurring_transfers(&mut conn, user_obj.id).unwrap();
+        assert_eq!(rec_list.len(), 1);
+        let next = chrono::NaiveDateTime::parse_from_str(&rec_list[0].next_run_at, "%Y-%m-%d %H:%M:%S").unwrap();
+        assert!(next > now);
+    }
+
+    #[test]
     fn test_create_transaction_and_get_user_transactions() {
         let mut conn = get_test_connection();
         create_user(&mut conn, "txuser", "pass", None).unwrap();
@@ -102,6 +281,45 @@ mod tests {
         let accounts = get_user_accounts(&mut conn, user_obj.id).unwrap();
         let res = create_transfer(&mut conn, accounts[0].id, accounts[1].id, 25.0, "2025-12-13".to_string());
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_delete_account_hides_from_accounts_but_keeps_transactions() {
+        let mut conn = get_test_connection();
+        create_user(&mut conn, "delaccuser", "pass", None).unwrap();
+        let user_obj = get_userid_by_username(&mut conn, "delaccuser").unwrap();
+
+        create_account(&mut conn, "ToDelete", "bank", 100.0, user_obj.id).unwrap();
+        let accounts_before = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        assert_eq!(accounts_before.len(), 1);
+
+        create_contact(&mut conn, "Vendor", user_obj.id).unwrap();
+        let contact_id: i32 = contacts
+            .filter(name.eq("Vendor"))
+            .filter(user.eq(user_obj.id))
+            .select(id)
+            .first(&mut conn)
+            .unwrap();
+
+        create_transaction(
+            &mut conn,
+            accounts_before[0].id,
+            contact_id,
+            -10.0,
+            "Food".to_string(),
+            "2025-12-13 00:00:00".to_string(),
+        )
+        .unwrap();
+
+        let deleted = delete_account(&mut conn, user_obj.id, accounts_before[0].id).unwrap();
+        assert_eq!(deleted, 1);
+
+        let accounts_after = get_user_accounts(&mut conn, user_obj.id).unwrap();
+        assert_eq!(accounts_after.len(), 0);
+
+        let txs = get_user_transactions(&mut conn, user_obj.id).unwrap();
+        assert_eq!(txs.len(), 1);
+        assert_eq!(txs[0].category, "Food");
     }
 
     #[test]
