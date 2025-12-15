@@ -519,8 +519,8 @@ This guide describes the steps required to set up and run the application in a r
 
 #### Supported Operating Systems
 
-- macOS
 - Linux
+- macOS (Sequoia)
 
 > **Note**  
 > Windows is not supported directly.  
@@ -645,7 +645,12 @@ cargo run
 ```
 ##### Notes: 
 
-All commands must be executed from the project root directory (financer)
+* All commands must be executed from the project root directory (financer)
+* If errors with installing diesel_cli (error: linker `cc` not found) run the below:  
+```bash
+sudo apt update
+sudo apt install -y build-essential pkg-config libsqlite3-dev
+```
 
 ## Team Member Contributions
 
