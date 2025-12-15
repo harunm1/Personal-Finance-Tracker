@@ -180,3 +180,118 @@ pub fn mortgage_amortization_schedule_with_frequency(
 pub fn mortgage_monthly_payment(principal: f64, annual_rate: f64, years: u32) -> f64 {
     mortgage_payment_with_frequency(principal, annual_rate, years, PaymentFrequency::Monthly)
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContributionFrequency {
+    Monthly,
+    BiWeekly,
+    Weekly,
+    Yearly,
+}
+
+impl ContributionFrequency {
+    pub fn contributions_per_year(self) -> f64 {
+        match self {
+            ContributionFrequency::Monthly => 12.0,
+            ContributionFrequency::BiWeekly => 26.0,
+            ContributionFrequency::Weekly => 52.0,
+            ContributionFrequency::Yearly => 1.0,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ContributionFrequency::Monthly => "Monthly",
+            ContributionFrequency::BiWeekly => "Bi-Weekly",
+            ContributionFrequency::Weekly => "Weekly",
+            ContributionFrequency::Yearly => "Yearly",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompoundingFrequency {
+    Annually,
+    SemiAnnually,
+    Quarterly,
+    Monthly,
+    Weekly,
+    Daily,
+}
+
+impl CompoundingFrequency {
+    pub fn compounds_per_year(self) -> u32 {
+        match self {
+            CompoundingFrequency::Annually => 1,
+            CompoundingFrequency::SemiAnnually => 2,
+            CompoundingFrequency::Quarterly => 4,
+            CompoundingFrequency::Monthly => 12,
+            CompoundingFrequency::Weekly => 52,
+            CompoundingFrequency::Daily => 365,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CompoundingFrequency::Annually => "Annually",
+            CompoundingFrequency::SemiAnnually => "Semi-Annually",
+            CompoundingFrequency::Quarterly => "Quarterly",
+            CompoundingFrequency::Monthly => "Monthly",
+            CompoundingFrequency::Weekly => "Weekly",
+            CompoundingFrequency::Daily => "Daily",
+        }
+    }
+}
+
+pub fn simple_interest_future_value(principal: f64, annual_rate: f64, years: f64) -> f64 {
+    principal * (1.0 + annual_rate * years)
+}
+
+pub fn compound_interest_future_value_with_contributions(
+    initial_investment: f64,
+    regular_addition: f64,
+    addition_frequency: ContributionFrequency,
+    annual_rate: f64,
+    compounding_frequency: CompoundingFrequency,
+    years: f64,
+) -> f64 {
+    if years <= 0.0 {
+        return initial_investment;
+    }
+
+    if regular_addition == 0.0 {
+        return future_value(
+            initial_investment,
+            annual_rate,
+            years,
+            compounding_frequency.compounds_per_year(),
+        );
+    }
+
+    let compounds_per_year = compounding_frequency.compounds_per_year() as f64;
+    let total_periods = (years * compounds_per_year).round().max(0.0) as u32;
+    let rate_per_period = if annual_rate == 0.0 {
+        0.0
+    } else {
+        annual_rate / compounds_per_year
+    };
+
+    let additions_per_year = addition_frequency.contributions_per_year();
+    let addition_interval_years = 1.0 / additions_per_year;
+    let mut next_addition_time_years = addition_interval_years;
+
+    let mut balance = initial_investment;
+    let eps = 1e-12;
+
+    for period in 1..=total_periods {
+        balance *= 1.0 + rate_per_period;
+
+        let t_years = period as f64 / compounds_per_year;
+        while t_years + eps >= next_addition_time_years && next_addition_time_years <= years + eps {
+            balance += regular_addition;
+            next_addition_time_years += addition_interval_years;
+        }
+    }
+
+    balance
+}

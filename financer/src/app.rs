@@ -3,7 +3,7 @@ use eframe::egui::Ui;
 use crate::db;
 use diesel::sqlite::SqliteConnection;
 use diesel::result::{Error, DatabaseErrorKind};
-use crate::models::{Account, Transaction};
+use crate::models::{Account, Transaction, RecurringTransaction, RecurringTransfer};
 use crate::models::{Budget, Period};
 use crate::finance_calculations::{
     real_rate,
@@ -15,6 +15,10 @@ use crate::finance_calculations::{
     PaymentFrequency,
     mortgage_payment_with_frequency,
     mortgage_amortization_schedule_with_frequency,
+    simple_interest_future_value,
+    compound_interest_future_value_with_contributions,
+    ContributionFrequency,
+    CompoundingFrequency,
 };
 use egui_plot::{Plot, Line, Text as PlotText};
 use std::collections::HashMap;
@@ -23,6 +27,7 @@ use eframe::egui::Color32;
 use csv::Writer;
 use serde::{Serialize, Deserialize};
 use std::fs;
+use std::time::{Duration, Instant};
 
 const CASHFLOW_STATE_FILE: &str = "cashflow_state.json";
 const BOND_STATE_FILE: &str = "bond_state.json";
@@ -52,6 +57,29 @@ pub enum AppState {
     CashflowTools,
     BondTools,
     MortgageTools,
+    SavingsCalculator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SavingsHorizonUnit {
+    Months,
+    Years,
+}
+
+impl SavingsHorizonUnit {
+    fn label(self) -> &'static str {
+        match self {
+            SavingsHorizonUnit::Months => "Months",
+            SavingsHorizonUnit::Years => "Years",
+        }
+    }
+
+    fn to_years(self, value: f64) -> f64 {
+        match self {
+            SavingsHorizonUnit::Months => value / 12.0,
+            SavingsHorizonUnit::Years => value,
+        }
+    }
 }
 #[derive(Serialize, Deserialize, Clone)]
 struct CashflowScenario {
@@ -95,6 +123,8 @@ pub struct FinancerApp {
     password: String,
     email: String,
     message: String,
+    confirm_delete_user: bool,
+    last_recurring_check: Option<Instant>,
     screen: AppState,
     conn: SqliteConnection,
     accounts_list: Vec<Account>,
@@ -141,6 +171,27 @@ pub struct FinancerApp {
     transfer_date: String,
     transfer_filter_start_date: String,
     transfer_filter_end_date: String,
+
+    // Recurring transactions
+    recurring_transactions_list: Vec<RecurringTransaction>,
+    recurring_tx_editing_id: Option<i32>,
+    recurring_tx_account_id: i32,
+    recurring_tx_amount: f32,
+    recurring_tx_is_expense: bool,
+    recurring_tx_category: String,
+    recurring_tx_custom_category: String,
+    recurring_tx_show_category_input: bool,
+    recurring_tx_next_run_at: String,
+    recurring_tx_frequency: Period,
+
+    // Recurring transfers
+    recurring_transfers_list: Vec<RecurringTransfer>,
+    recurring_transfer_editing_id: Option<i32>,
+    recurring_transfer_from_account_id: i32,
+    recurring_transfer_to_account_id: i32,
+    recurring_transfer_amount: f32,
+    recurring_transfer_next_run_at: String,
+    recurring_transfer_frequency: Period,
     // Cash-flow tools state (dynamic scenarios, dated entries)
     cf_nominal_rate_percent: f32,
     cf_inflation_rate_percent: f32,
@@ -166,6 +217,22 @@ pub struct FinancerApp {
     // Mortgage tools state (dynamic scenarios)
     mortgage_scenarios: Vec<MortgageScenario>,
     mortgage_state_file: String,
+
+    // Savings calculator state
+    savings_simple_principal: f32,
+    savings_simple_rate_percent: f32,
+    savings_simple_horizon_value: f32,
+    savings_simple_horizon_unit: SavingsHorizonUnit,
+    savings_simple_fv: Option<f64>,
+
+    savings_comp_initial_investment: f32,
+    savings_comp_regular_addition: f32,
+    savings_comp_regular_addition_frequency: ContributionFrequency,
+    savings_comp_rate_percent: f32,
+    savings_comp_compounding_frequency: CompoundingFrequency,
+    savings_comp_horizon_value: f32,
+    savings_comp_horizon_unit: SavingsHorizonUnit,
+    savings_comp_fv: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -374,6 +441,8 @@ impl FinancerApp {
             password: String::new(),
             email: String::new(),
             message: String::new(),
+            confirm_delete_user: false,
+            last_recurring_check: None,
             screen: AppState::Login,
             conn,
             user_id: None,
@@ -421,6 +490,25 @@ impl FinancerApp {
             transfer_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
             transfer_filter_start_date: chrono::Local::now().date_naive().with_day(1).unwrap().format("%Y-%m-%d").to_string(),
             transfer_filter_end_date: chrono::Local::now().date_naive().format("%Y-%m-%d").to_string(),
+
+            recurring_transactions_list: Vec::new(),
+            recurring_tx_editing_id: None,
+            recurring_tx_account_id: 0,
+            recurring_tx_amount: 0.0,
+            recurring_tx_is_expense: true,
+            recurring_tx_category: DEFAULT_CATEGORIES[0].to_string(),
+            recurring_tx_custom_category: String::new(),
+            recurring_tx_show_category_input: false,
+            recurring_tx_next_run_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            recurring_tx_frequency: Period::Monthly,
+
+            recurring_transfers_list: Vec::new(),
+            recurring_transfer_editing_id: None,
+            recurring_transfer_from_account_id: 0,
+            recurring_transfer_to_account_id: 0,
+            recurring_transfer_amount: 0.0,
+            recurring_transfer_next_run_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            recurring_transfer_frequency: Period::Monthly,
             // Cash-flow tools initialization
             cf_nominal_rate_percent: 5.0,
             cf_inflation_rate_percent: 2.0,
@@ -471,6 +559,22 @@ impl FinancerApp {
                 error: None,
             }],
             mortgage_state_file: MORTGAGE_STATE_FILE.to_string(),
+
+            // Savings calculator initialization
+            savings_simple_principal: 1000.0,
+            savings_simple_rate_percent: 5.0,
+            savings_simple_horizon_value: 5.0,
+            savings_simple_horizon_unit: SavingsHorizonUnit::Years,
+            savings_simple_fv: None,
+
+            savings_comp_initial_investment: 1000.0,
+            savings_comp_regular_addition: 100.0,
+            savings_comp_regular_addition_frequency: ContributionFrequency::Monthly,
+            savings_comp_rate_percent: 6.0,
+            savings_comp_compounding_frequency: CompoundingFrequency::Monthly,
+            savings_comp_horizon_value: 5.0,
+            savings_comp_horizon_unit: SavingsHorizonUnit::Years,
+            savings_comp_fv: None,
         }
     }
 
@@ -525,6 +629,20 @@ impl FinancerApp {
                     egui::Color32::from_rgb(255, 159, 64),
                     egui::Color32::from_rgb(199, 199, 199),
                 ];
+
+                // Special-case a single slice: the wedge polygon becomes invalid/non-convex when
+                // trying to represent a full circle using `convex_polygon` with the center point.
+                if category_totals.len() == 1 {
+                    painter.circle_filled(center, radius, colors[0]);
+                    painter.text(
+                        center,
+                        egui::Align2::CENTER_CENTER,
+                        "100%",
+                        egui::FontId::proportional(12.0),
+                        egui::Color32::BLACK,
+                    );
+                    return;
+                }
 
                 let mut start_angle = 0.0_f32;
                 for (i, (_, amount)) in category_totals.iter().enumerate() {
@@ -654,6 +772,48 @@ impl FinancerApp {
         }
     }
 
+    fn load_user_recurring_transactions(&mut self) {
+        if let Some(uid) = self.user_id {
+            self.recurring_transactions_list =
+                db::get_user_recurring_transactions(&mut self.conn, uid).unwrap_or_default();
+        } else {
+            self.recurring_transactions_list.clear();
+        }
+    }
+
+    fn load_user_recurring_transfers(&mut self) {
+        if let Some(uid) = self.user_id {
+            self.recurring_transfers_list =
+                db::get_user_recurring_transfers(&mut self.conn, uid).unwrap_or_default();
+        } else {
+            self.recurring_transfers_list.clear();
+        }
+    }
+
+    fn maybe_process_due_recurring(&mut self) {
+        let Some(uid) = self.user_id else { return; };
+
+        let should_check = match self.last_recurring_check {
+            None => true,
+            Some(t) => t.elapsed() >= Duration::from_secs(5),
+        };
+        if !should_check {
+            return;
+        }
+        self.last_recurring_check = Some(Instant::now());
+
+        let now = chrono::Local::now().naive_local();
+        let processed = db::process_due_recurring(&mut self.conn, uid, now).unwrap_or(0);
+        if processed > 0 {
+            self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+            self.load_user_transactions();
+            self.load_user_budgets();
+            self.compute_budget_progress(self.period_offset);
+            self.load_user_recurring_transactions();
+            self.load_user_recurring_transfers();
+        }
+    }
+
     fn load_user_categories(&mut self) {
         if let Some(uid) = self.user_id {
             self.user_categories = db::get_user_categories(&mut self.conn, uid).unwrap_or_default();
@@ -760,7 +920,10 @@ impl FinancerApp {
                     Ok(true) => {
                         self.user_id = db::get_userid_by_username(&mut self.conn, &self.username).ok().map(|u| u.id);
                         if let Some(uid) = self.user_id {
+                            let _ = db::process_due_recurring(&mut self.conn, uid, chrono::Local::now().naive_local());
                             self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                            self.load_user_recurring_transactions();
+                            self.load_user_recurring_transfers();
                         }
                         self.message.clear();
                         self.screen = AppState::Dashboard;
@@ -775,6 +938,10 @@ impl FinancerApp {
             if ui.button("Register").clicked() {
                 self.screen = AppState::Register;
                 self.message.clear();
+            }
+
+            if ui.button("Exit Program").clicked() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
 
             ui.separator();
@@ -834,8 +1001,61 @@ impl FinancerApp {
 
     fn show_dashboard(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.maybe_process_due_recurring();
             ui.heading("FinanceR Dashboard");
             ui.label(format!("Logged in as: {}", self.username));
+
+            ui.horizontal(|ui| {
+                if ui.button("Logout").clicked() {
+                    self.screen = AppState::Login;
+                    self.username.clear();
+                    self.password.clear();
+                    self.user_id = None;
+                    self.accounts_list.clear();
+                    self.message.clear();
+                    self.confirm_delete_user = false;
+                }
+
+                if ui.button("Delete User").clicked() {
+                    self.confirm_delete_user = true;
+                }
+
+                if ui.button("Exit Program").clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+
+            if self.confirm_delete_user {
+                ui.horizontal(|ui| {
+                    ui.label("Confirm delete user?");
+
+                    if ui.button("Confirm Delete").clicked() {
+                        if let Some(uid) = self.user_id {
+                            match db::delete_user_and_all_data(&mut self.conn, uid) {
+                                Ok(()) => {
+                                    self.screen = AppState::Login;
+                                    self.username.clear();
+                                    self.password.clear();
+                                    self.email.clear();
+                                    self.user_id = None;
+                                    self.accounts_list.clear();
+                                    self.budgets.clear();
+                                    self.transactions_list.clear();
+                                    self.message = "User deleted.".to_string();
+                                }
+                                Err(e) => {
+                                    self.message = format!("Failed to delete user: {}", e);
+                                }
+                            }
+                        }
+                        self.confirm_delete_user = false;
+                    }
+
+                    if ui.button("Cancel").clicked() {
+                        self.confirm_delete_user = false;
+                    }
+                });
+            }
 
             ui.separator();
             ui.heading("Your Accounts:");
@@ -844,13 +1064,44 @@ impl FinancerApp {
                 ui.label("No accounts found. Please create one.");
             } else {
                 let mut clicked_account_id: Option<i32> = None;
+                let mut delete_account_id: Option<i32> = None;
                 
                 for account in &self.accounts_list {
                     ui.horizontal(|ui| {
                         if ui.button(format!("{} - {}: ${:.2}", account.name, account.account_type, account.balance)).clicked() {
                             clicked_account_id = Some(account.id);
                         }
+
+                        if ui.button("Delete").clicked() {
+                            delete_account_id = Some(account.id);
+                        }
                     });
+                }
+
+                if let Some(account_id) = delete_account_id {
+                    if let Some(uid) = self.user_id {
+                        match db::delete_account(&mut self.conn, uid, account_id) {
+                            Ok(_) => {
+                                self.message = "Account deleted.".to_string();
+                                self.accounts_list = db::get_user_accounts(&mut self.conn, uid).unwrap_or_default();
+                                if self.tx_filter_account_id == Some(account_id) {
+                                    self.tx_filter_account_id = None;
+                                }
+                                if self.tx_account_id == account_id {
+                                    self.tx_account_id = 0;
+                                }
+                                if self.transfer_from_account_id == account_id {
+                                    self.transfer_from_account_id = 0;
+                                }
+                                if self.transfer_to_account_id == account_id {
+                                    self.transfer_to_account_id = 0;
+                                }
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to delete account: {}", e);
+                            }
+                        }
+                    }
                 }
                 
                 if let Some(account_id) = clicked_account_id {
@@ -858,6 +1109,7 @@ impl FinancerApp {
                     self.screen = AppState::Transactions;
                     self.load_user_transactions();
                     self.load_user_categories();
+                    self.load_user_recurring_transactions();
                 }
             }
 
@@ -899,15 +1151,6 @@ impl FinancerApp {
             ui.separator();
             ui.label(&self.message);
 
-            if ui.button("Logout").clicked() {
-                self.screen = AppState::Login;
-                self.username.clear();
-                self.password.clear();
-                self.user_id = None;
-                self.accounts_list.clear();
-                self.message.clear();
-            }
-
             if ui.button("Budgets").clicked() {
                 self.screen = AppState::Budgeting;
                 self.load_user_budgets();
@@ -920,16 +1163,21 @@ impl FinancerApp {
                 self.screen = AppState::Transactions;
                 self.load_user_transactions();
                 self.load_user_categories();
+                self.load_user_recurring_transactions();
             }
 
             if ui.button("Transfers").clicked() {
                 self.screen = AppState::Transfers;
                 self.load_user_transactions();
+                self.load_user_recurring_transfers();
             }
 
             ui.separator();
             ui.heading("Planning Tools");
             ui.horizontal(|ui| {
+                if ui.button("Savings Calculator").clicked() {
+                    self.screen = AppState::SavingsCalculator;
+                }
                 if ui.button("Bond Tools").clicked() {
                     self.screen = AppState::BondTools;
                 }
@@ -1017,6 +1265,7 @@ impl FinancerApp {
         self.load_user_transactions();
         use egui::Color32;
         egui::CentralPanel::default().show(ctx, |ui| {
+        egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
         ui.heading("Budgets");
 
         ui.horizontal(|ui| {
@@ -1224,6 +1473,7 @@ impl FinancerApp {
                 self.show_income_line_chart(ui);
             });
         });
+        });
     });
 
     if self.editor_open {
@@ -1340,6 +1590,10 @@ impl FinancerApp {
                             if db::delete_budget(&mut self.conn, id).is_ok() {
                                 self.load_user_budgets();
                                 self.compute_budget_progress(0);
+                                self.editor_category.clear();
+                                self.editor_limit_cents = 0;
+                                self.editor_open = false;
+                                self.current_editing = None;
                             } else {
                                 self.message = "Failed to delete budget.".to_string();
                             }
@@ -1357,6 +1611,7 @@ impl FinancerApp {
 
     fn show_transactions(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.maybe_process_due_recurring();
             ui.heading("Transactions");
 
             ui.horizontal(|ui| {
@@ -1480,9 +1735,203 @@ impl FinancerApp {
             ui.label(&self.message);
 
             ui.separator();
+            ui.heading("Recurring Transactions");
 
             ui.horizontal(|ui| {
-                if ui.button("Export CSV").clicked() {
+                ui.label("Account:");
+                egui::ComboBox::from_id_source("rec_tx_account_selector")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.recurring_tx_account_id)
+                            .map(|a| a.name.as_str())
+                            .unwrap_or("Select Account"),
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            ui.selectable_value(&mut self.recurring_tx_account_id, account.id, &account.name);
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Amount:");
+                ui.add(egui::DragValue::new(&mut self.recurring_tx_amount).speed(1.0).prefix("$"));
+                ui.checkbox(&mut self.recurring_tx_is_expense, "Expense");
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Category:");
+                let all_categories = self.get_all_categories();
+                egui::ComboBox::from_id_source("rec_tx_category_selector")
+                    .selected_text(&self.recurring_tx_category)
+                    .show_ui(ui, |ui| {
+                        for cat in &all_categories {
+                            ui.selectable_value(&mut self.recurring_tx_category, cat.clone(), cat);
+                        }
+                        ui.separator();
+                        if ui
+                            .selectable_label(self.recurring_tx_show_category_input, "+ Add New Category")
+                            .clicked()
+                        {
+                            self.recurring_tx_show_category_input = true;
+                        }
+                    });
+            });
+
+            if self.recurring_tx_show_category_input {
+                ui.horizontal(|ui| {
+                    ui.label("New Category:");
+                    ui.text_edit_singleline(&mut self.recurring_tx_custom_category);
+                    if ui.button("Add").clicked() {
+                        if !self.recurring_tx_custom_category.is_empty() && self.user_categories.len() < 50 {
+                            self.recurring_tx_category = self.recurring_tx_custom_category.clone();
+                            self.recurring_tx_custom_category.clear();
+                            self.recurring_tx_show_category_input = false;
+                        }
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.recurring_tx_custom_category.clear();
+                        self.recurring_tx_show_category_input = false;
+                    }
+                });
+            }
+
+            ui.horizontal(|ui| {
+                ui.label("Next Run (YYYY-MM-DD HH:MM:SS):");
+                ui.text_edit_singleline(&mut self.recurring_tx_next_run_at);
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Frequency:");
+                egui::ComboBox::from_id_source("rec_tx_frequency")
+                    .selected_text(self.recurring_tx_frequency.to_str())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.recurring_tx_frequency, Period::Daily, "Daily");
+                        ui.selectable_value(&mut self.recurring_tx_frequency, Period::Weekly, "Weekly");
+                        ui.selectable_value(&mut self.recurring_tx_frequency, Period::Monthly, "Monthly");
+                        ui.selectable_value(&mut self.recurring_tx_frequency, Period::Yearly, "Yearly");
+                    });
+            });
+
+            let save_label = if self.recurring_tx_editing_id.is_some() {
+                "Update Recurring Transaction"
+            } else {
+                "Add Recurring Transaction"
+            };
+
+            if ui.button(save_label).clicked() {
+                if let Some(uid) = self.user_id {
+                    if self.recurring_tx_account_id <= 0 || self.recurring_tx_amount <= 0.0 {
+                        self.message = "Select an account and enter a positive amount.".to_string();
+                    } else if chrono::NaiveDateTime::parse_from_str(&self.recurring_tx_next_run_at, "%Y-%m-%d %H:%M:%S").is_err() {
+                        self.message = "Next Run must be in format YYYY-MM-DD HH:MM:SS".to_string();
+                    } else {
+                        let amount = if self.recurring_tx_is_expense {
+                            -self.recurring_tx_amount
+                        } else {
+                            self.recurring_tx_amount
+                        };
+
+                        let changes = crate::models::NewRecurringTransaction {
+                            user_id: uid,
+                            account_id: self.recurring_tx_account_id,
+                            contact_id: 0,
+                            amount,
+                            category: self.recurring_tx_category.clone(),
+                            next_run_at: self.recurring_tx_next_run_at.clone(),
+                            frequency: self.recurring_tx_frequency.to_str().to_string(),
+                        };
+
+                        let result = if let Some(item_id) = self.recurring_tx_editing_id {
+                            db::update_recurring_transaction(&mut self.conn, uid, item_id, changes).map(|_| ())
+                        } else {
+                            db::create_recurring_transaction(&mut self.conn, changes).map(|_| ())
+                        };
+
+                        match result {
+                            Ok(()) => {
+                                self.message = "Recurring transaction saved.".to_string();
+                                self.recurring_tx_editing_id = None;
+                                self.recurring_tx_amount = 0.0;
+                                self.recurring_tx_is_expense = true;
+                                self.recurring_tx_next_run_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                                self.load_user_recurring_transactions();
+                                self.load_user_categories();
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to save recurring transaction: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if self.recurring_transactions_list.is_empty() {
+                ui.label("No recurring transactions.");
+            } else {
+                let mut delete_id: Option<i32> = None;
+                let mut edit_item: Option<RecurringTransaction> = None;
+
+                for item in &self.recurring_transactions_list {
+                    let account_name = self
+                        .accounts_list
+                        .iter()
+                        .find(|a| a.id == item.account_id)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| format!("Account {}", item.account_id));
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "{} | {}${:.2} | {} | next: {} | {}",
+                            account_name,
+                            if item.amount < 0.0 { "-" } else { "+" },
+                            item.amount.abs(),
+                            item.category,
+                            item.next_run_at,
+                            item.frequency
+                        ));
+                        if ui.button("Edit").clicked() {
+                            edit_item = Some(item.clone());
+                        }
+                        if ui.button("Delete").clicked() {
+                            delete_id = Some(item.id);
+                        }
+                    });
+                }
+
+                if let Some(item) = edit_item {
+                    self.recurring_tx_editing_id = Some(item.id);
+                    self.recurring_tx_account_id = item.account_id;
+                    self.recurring_tx_is_expense = item.amount < 0.0;
+                    self.recurring_tx_amount = item.amount.abs();
+                    self.recurring_tx_category = item.category;
+                    self.recurring_tx_next_run_at = item.next_run_at;
+                    self.recurring_tx_frequency = Period::from_str(&item.frequency);
+                }
+
+                if let Some(item_id) = delete_id {
+                    if let Some(uid) = self.user_id {
+                        match db::delete_recurring_transaction(&mut self.conn, uid, item_id) {
+                            Ok(_) => {
+                                self.message = "Recurring transaction deleted.".to_string();
+                                self.load_user_recurring_transactions();
+                                if self.recurring_tx_editing_id == Some(item_id) {
+                                    self.recurring_tx_editing_id = None;
+                                }
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to delete recurring transaction: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                if ui.button("Export CSV Report").clicked() {
                     let file_path = format!(
                         "transactions_{}_to_{}.csv",
                         self.tx_filter_start_date.replace("-", ""),
@@ -1826,6 +2275,7 @@ impl FinancerApp {
 
     fn show_transfers(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.maybe_process_due_recurring();
             ui.heading("Account Transfers");
 
             ui.horizontal(|ui| {
@@ -1936,8 +2386,190 @@ impl FinancerApp {
             ui.separator();
             ui.label(&self.message);
 
+            ui.separator();
+            ui.heading("Recurring Transfers");
+
             ui.horizontal(|ui| {
-                if ui.button("Export CSV").clicked() {
+                ui.label("From Account:");
+                egui::ComboBox::from_id_source("rec_transfer_from")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.recurring_transfer_from_account_id)
+                            .map(|a| format!("{} (${:.2})", a.name, a.balance))
+                            .unwrap_or_else(|| "Select Account".to_string()),
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            ui.selectable_value(
+                                &mut self.recurring_transfer_from_account_id,
+                                account.id,
+                                format!("{} (${:.2})", account.name, account.balance),
+                            );
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("To Account:");
+                egui::ComboBox::from_id_source("rec_transfer_to")
+                    .selected_text(
+                        self.accounts_list
+                            .iter()
+                            .find(|a| a.id == self.recurring_transfer_to_account_id)
+                            .map(|a| format!("{} (${:.2})", a.name, a.balance))
+                            .unwrap_or_else(|| "Select Account".to_string()),
+                    )
+                    .show_ui(ui, |ui| {
+                        for account in &self.accounts_list {
+                            if account.id != self.recurring_transfer_from_account_id {
+                                ui.selectable_value(
+                                    &mut self.recurring_transfer_to_account_id,
+                                    account.id,
+                                    format!("{} (${:.2})", account.name, account.balance),
+                                );
+                            }
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Amount:");
+                ui.add(egui::DragValue::new(&mut self.recurring_transfer_amount).speed(1.0).prefix("$"));
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Next Run (YYYY-MM-DD HH:MM:SS):");
+                ui.text_edit_singleline(&mut self.recurring_transfer_next_run_at);
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Frequency:");
+                egui::ComboBox::from_id_source("rec_transfer_frequency")
+                    .selected_text(self.recurring_transfer_frequency.to_str())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.recurring_transfer_frequency, Period::Daily, "Daily");
+                        ui.selectable_value(&mut self.recurring_transfer_frequency, Period::Weekly, "Weekly");
+                        ui.selectable_value(&mut self.recurring_transfer_frequency, Period::Monthly, "Monthly");
+                        ui.selectable_value(&mut self.recurring_transfer_frequency, Period::Yearly, "Yearly");
+                    });
+            });
+
+            let save_label = if self.recurring_transfer_editing_id.is_some() {
+                "Update Recurring Transfer"
+            } else {
+                "Add Recurring Transfer"
+            };
+
+            if ui.button(save_label).clicked() {
+                if let Some(uid) = self.user_id {
+                    if self.recurring_transfer_from_account_id <= 0
+                        || self.recurring_transfer_to_account_id <= 0
+                        || self.recurring_transfer_from_account_id == self.recurring_transfer_to_account_id
+                        || self.recurring_transfer_amount <= 0.0
+                    {
+                        self.message = "Select two different accounts and enter a positive amount.".to_string();
+                    } else if chrono::NaiveDateTime::parse_from_str(&self.recurring_transfer_next_run_at, "%Y-%m-%d %H:%M:%S").is_err() {
+                        self.message = "Next Run must be in format YYYY-MM-DD HH:MM:SS".to_string();
+                    } else {
+                        let changes = crate::models::NewRecurringTransfer {
+                            user_id: uid,
+                            from_account_id: self.recurring_transfer_from_account_id,
+                            to_account_id: self.recurring_transfer_to_account_id,
+                            amount: self.recurring_transfer_amount,
+                            next_run_at: self.recurring_transfer_next_run_at.clone(),
+                            frequency: self.recurring_transfer_frequency.to_str().to_string(),
+                        };
+
+                        let result = if let Some(item_id) = self.recurring_transfer_editing_id {
+                            db::update_recurring_transfer(&mut self.conn, uid, item_id, changes).map(|_| ())
+                        } else {
+                            db::create_recurring_transfer(&mut self.conn, changes).map(|_| ())
+                        };
+
+                        match result {
+                            Ok(()) => {
+                                self.message = "Recurring transfer saved.".to_string();
+                                self.recurring_transfer_editing_id = None;
+                                self.recurring_transfer_amount = 0.0;
+                                self.recurring_transfer_next_run_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                                self.load_user_recurring_transfers();
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to save recurring transfer: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if self.recurring_transfers_list.is_empty() {
+                ui.label("No recurring transfers.");
+            } else {
+                let mut delete_id: Option<i32> = None;
+                let mut edit_item: Option<RecurringTransfer> = None;
+
+                for item in &self.recurring_transfers_list {
+                    let from_name = self
+                        .accounts_list
+                        .iter()
+                        .find(|a| a.id == item.from_account_id)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| format!("Account {}", item.from_account_id));
+                    let to_name = self
+                        .accounts_list
+                        .iter()
+                        .find(|a| a.id == item.to_account_id)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| format!("Account {}", item.to_account_id));
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "{} -> {} | ${:.2} | next: {} | {}",
+                            from_name,
+                            to_name,
+                            item.amount,
+                            item.next_run_at,
+                            item.frequency
+                        ));
+                        if ui.button("Edit").clicked() {
+                            edit_item = Some(item.clone());
+                        }
+                        if ui.button("Delete").clicked() {
+                            delete_id = Some(item.id);
+                        }
+                    });
+                }
+
+                if let Some(item) = edit_item {
+                    self.recurring_transfer_editing_id = Some(item.id);
+                    self.recurring_transfer_from_account_id = item.from_account_id;
+                    self.recurring_transfer_to_account_id = item.to_account_id;
+                    self.recurring_transfer_amount = item.amount;
+                    self.recurring_transfer_next_run_at = item.next_run_at;
+                    self.recurring_transfer_frequency = Period::from_str(&item.frequency);
+                }
+
+                if let Some(item_id) = delete_id {
+                    if let Some(uid) = self.user_id {
+                        match db::delete_recurring_transfer(&mut self.conn, uid, item_id) {
+                            Ok(_) => {
+                                self.message = "Recurring transfer deleted.".to_string();
+                                self.load_user_recurring_transfers();
+                                if self.recurring_transfer_editing_id == Some(item_id) {
+                                    self.recurring_transfer_editing_id = None;
+                                }
+                            }
+                            Err(e) => {
+                                self.message = format!("Failed to delete recurring transfer: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            ui.horizontal(|ui| {
+                if ui.button("Export CSV Report").clicked() {
                     let file_path = format!(
                         "transfers_{}_to_{}.csv",
                         self.transfer_filter_start_date.replace("-", ""),
@@ -2081,6 +2713,7 @@ impl FinancerApp {
 impl FinancerApp {
     fn show_cashflow_tools(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             ui.heading("Cash Flow Tools");
 
             ui.horizontal(|ui| {
@@ -2222,13 +2855,10 @@ impl FinancerApp {
             ui.separator();
 
             ui.heading("Cash Flow Scenarios");
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let count = self.cf_scenarios.len();
-                if count == 0 {
-                    ui.label("No scenarios defined.");
-                    return;
-                }
-
+            let count = self.cf_scenarios.len();
+            if count == 0 {
+                ui.label("No scenarios defined.");
+            } else {
                 let cols_count = count.min(3);
                 let can_delete = count > 1;
                 let mut to_delete: Option<usize> = None;
@@ -2263,7 +2893,7 @@ impl FinancerApp {
                         self.cf_scenarios.remove(idx);
                     }
                 }
-            });
+            }
 
             if ui.button("Compute PV & FV for all scenarios").clicked() {
                 let parsed_date = NaiveDate::parse_from_str(&self.cf_valuation_date, "%Y-%m-%d");
@@ -2404,11 +3034,13 @@ impl FinancerApp {
                     ));
                 }
             }
+            });
         });
     }
 
     fn show_bond_tools(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             ui.heading("Bond Tools");
 
             ui.horizontal(|ui| {
@@ -2454,67 +3086,65 @@ impl FinancerApp {
             if self.bond_scenarios.is_empty() {
                 ui.label("No bond scenarios defined.");
             } else {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let count = self.bond_scenarios.len();
-                    let cols_count = count.min(3);
-                    let can_delete = count > 1;
-                    let mut to_delete: Option<usize> = None;
-                    ui.columns(cols_count, |cols| {
-                        for (idx, scen) in self.bond_scenarios.iter_mut().enumerate() {
-                            let col = idx % cols_count;
-                            let mut delete_here = false;
-                            cols[col].group(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.heading(format!("Bond {}", scen.name));
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
-                                            delete_here = true;
-                                        }
-                                    });
+                let count = self.bond_scenarios.len();
+                let cols_count = count.min(3);
+                let can_delete = count > 1;
+                let mut to_delete: Option<usize> = None;
+                ui.columns(cols_count, |cols| {
+                    for (idx, scen) in self.bond_scenarios.iter_mut().enumerate() {
+                        let col = idx % cols_count;
+                        let mut delete_here = false;
+                        cols[col].group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.heading(format!("Bond {}", scen.name));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                        delete_here = true;
+                                    }
                                 });
-                                ui.horizontal(|ui| {
-                                    ui.label("Name:");
-                                    ui.text_edit_singleline(&mut scen.title);
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Face value ($):");
-                                    ui.add(egui::DragValue::new(&mut scen.face_value).speed(10.0));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Coupon rate (%):");
-                                    ui.add(egui::DragValue::new(&mut scen.coupon_percent).speed(0.1));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Yield to maturity (%):");
-                                    ui.add(egui::DragValue::new(&mut scen.ytm_percent).speed(0.1));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Years to maturity:");
-                                    ui.add(egui::DragValue::new(&mut scen.years_to_maturity).speed(0.5));
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Payments per year:");
-                                    ui.add(egui::DragValue::new(&mut scen.payments_per_year).clamp_range(1..=12));
-                                });
-                                if let Some(ref err) = scen.error {
-                                    ui.colored_label(egui::Color32::RED, err);
-                                }
-                                if let Some(price) = scen.price {
-                                    ui.label(format!("Price: ${:.2}", price));
-                                }
                             });
-                            if delete_here {
-                                to_delete = Some(idx);
+                            ui.horizontal(|ui| {
+                                ui.label("Name:");
+                                ui.text_edit_singleline(&mut scen.title);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Face value ($):");
+                                ui.add(egui::DragValue::new(&mut scen.face_value).speed(10.0));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Coupon rate (%):");
+                                ui.add(egui::DragValue::new(&mut scen.coupon_percent).speed(0.1));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Yield to maturity (%):");
+                                ui.add(egui::DragValue::new(&mut scen.ytm_percent).speed(0.1));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Years to maturity:");
+                                ui.add(egui::DragValue::new(&mut scen.years_to_maturity).speed(0.5));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Payments per year:");
+                                ui.add(egui::DragValue::new(&mut scen.payments_per_year).clamp_range(1..=12));
+                            });
+                            if let Some(ref err) = scen.error {
+                                ui.colored_label(egui::Color32::RED, err);
                             }
-                        }
-                    });
-
-                    if let Some(idx) = to_delete {
-                        if self.bond_scenarios.len() > 1 {
-                            self.bond_scenarios.remove(idx);
+                            if let Some(price) = scen.price {
+                                ui.label(format!("Price: ${:.2}", price));
+                            }
+                        });
+                        if delete_here {
+                            to_delete = Some(idx);
                         }
                     }
                 });
+
+                if let Some(idx) = to_delete {
+                    if self.bond_scenarios.len() > 1 {
+                        self.bond_scenarios.remove(idx);
+                    }
+                }
             }
 
             if ui.button("Price All Bonds").clicked() {
@@ -2555,11 +3185,13 @@ impl FinancerApp {
             } else {
                 ui.label("Price bond scenarios to see a comparison.");
             }
+            });
         });
     }
 
     fn show_mortgage_tools(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
             ui.heading("Mortgage Tools");
 
             ui.horizontal(|ui| {
@@ -2606,85 +3238,83 @@ impl FinancerApp {
             if self.mortgage_scenarios.is_empty() {
                 ui.label("No mortgage scenarios defined.");
             } else {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let count = self.mortgage_scenarios.len();
-                    let cols_count = count.min(3);
-                    let can_delete = count > 1;
-                    let mut to_delete: Option<usize> = None;
-                    ui.columns(cols_count, |cols| {
-                        for (idx, scen) in self.mortgage_scenarios.iter_mut().enumerate() {
-                            let col = idx % cols_count;
-                            let mut delete_here = false;
-                            cols[col].group(|ui| {
-                                ui.push_id(idx, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.heading(format!("Mortgage {}", scen.name));
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
-                                                delete_here = true;
-                                            }
-                                        });
+                let count = self.mortgage_scenarios.len();
+                let cols_count = count.min(3);
+                let can_delete = count > 1;
+                let mut to_delete: Option<usize> = None;
+                ui.columns(cols_count, |cols| {
+                    for (idx, scen) in self.mortgage_scenarios.iter_mut().enumerate() {
+                        let col = idx % cols_count;
+                        let mut delete_here = false;
+                        cols[col].group(|ui| {
+                            ui.push_id(idx, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.heading(format!("Mortgage {}", scen.name));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                                            delete_here = true;
+                                        }
                                     });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Name:");
-                                        ui.text_edit_singleline(&mut scen.title);
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Principal ($):");
-                                        ui.add(egui::DragValue::new(&mut scen.principal).speed(1000.0));
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Annual rate (%):");
-                                        ui.add(egui::DragValue::new(&mut scen.annual_rate_percent).speed(0.1));
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Years:");
-                                        ui.add(egui::DragValue::new(&mut scen.years).speed(1.0));
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Payment frequency:");
-                                        egui::ComboBox::from_id_source(format!("mort_freq_{}_{}", idx, scen.name))
-                                            .selected_text(match scen.frequency {
-                                            PaymentFrequency::Monthly => "Monthly",
-                                            PaymentFrequency::BiWeekly => "Bi-weekly",
-                                            PaymentFrequency::Weekly => "Weekly",
-                                            PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
-                                            })
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(&mut scen.frequency, PaymentFrequency::Monthly, "Monthly");
-                                                ui.selectable_value(&mut scen.frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
-                                                ui.selectable_value(&mut scen.frequency, PaymentFrequency::Weekly, "Weekly");
-                                                ui.selectable_value(
-                                                    &mut scen.frequency,
-                                                    PaymentFrequency::AcceleratedWeekly,
-                                                    "Accelerated weekly",
-                                                );
-                                            });
-                                    });
-                                    if let Some(ref err) = scen.error {
-                                        ui.colored_label(egui::Color32::RED, err);
-                                    }
-                                    if let Some(p) = scen.payment_per_period {
-                                        ui.label(format!("Payment per period: ${:.2}", p));
-                                    }
-                                    if let (Some(t), Some(i)) = (scen.total_paid, scen.total_interest) {
-                                        ui.label(format!("Total paid: ${:.2}", t));
-                                        ui.label(format!("Total interest: ${:.2}", i));
-                                    }
                                 });
+                                ui.horizontal(|ui| {
+                                    ui.label("Name:");
+                                    ui.text_edit_singleline(&mut scen.title);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Principal ($):");
+                                    ui.add(egui::DragValue::new(&mut scen.principal).speed(1000.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Annual rate (%):");
+                                    ui.add(egui::DragValue::new(&mut scen.annual_rate_percent).speed(0.1));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Years:");
+                                    ui.add(egui::DragValue::new(&mut scen.years).speed(1.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Payment frequency:");
+                                    egui::ComboBox::from_id_source(format!("mort_freq_{}_{}", idx, scen.name))
+                                        .selected_text(match scen.frequency {
+                                        PaymentFrequency::Monthly => "Monthly",
+                                        PaymentFrequency::BiWeekly => "Bi-weekly",
+                                        PaymentFrequency::Weekly => "Weekly",
+                                        PaymentFrequency::AcceleratedWeekly => "Accelerated weekly",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::Monthly, "Monthly");
+                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::BiWeekly, "Bi-weekly");
+                                            ui.selectable_value(&mut scen.frequency, PaymentFrequency::Weekly, "Weekly");
+                                            ui.selectable_value(
+                                                &mut scen.frequency,
+                                                PaymentFrequency::AcceleratedWeekly,
+                                                "Accelerated weekly",
+                                            );
+                                        });
+                                });
+                                if let Some(ref err) = scen.error {
+                                    ui.colored_label(egui::Color32::RED, err);
+                                }
+                                if let Some(p) = scen.payment_per_period {
+                                    ui.label(format!("Payment per period: ${:.2}", p));
+                                }
+                                if let (Some(t), Some(i)) = (scen.total_paid, scen.total_interest) {
+                                    ui.label(format!("Total paid: ${:.2}", t));
+                                    ui.label(format!("Total interest: ${:.2}", i));
+                                }
                             });
-                            if delete_here {
-                                to_delete = Some(idx);
-                            }
-                        }
-                    });
-
-                    if let Some(idx) = to_delete {
-                        if self.mortgage_scenarios.len() > 1 {
-                            self.mortgage_scenarios.remove(idx);
+                        });
+                        if delete_here {
+                            to_delete = Some(idx);
                         }
                     }
                 });
+
+                if let Some(idx) = to_delete {
+                    if self.mortgage_scenarios.len() > 1 {
+                        self.mortgage_scenarios.remove(idx);
+                    }
+                }
             }
 
             if ui.button("Compute All Mortgages").clicked() {
@@ -2759,6 +3389,221 @@ impl FinancerApp {
                     label, interest
                 ));
             }
+            });
+        });
+    }
+
+    fn show_savings_calculator(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            ui.heading("Savings Calculator");
+
+            ui.horizontal(|ui| {
+                if ui.button("Back to Dashboard").clicked() {
+                    self.screen = AppState::Dashboard;
+                }
+            });
+
+            ui.separator();
+
+            ui.group(|ui| {
+                ui.heading("Simple Interest");
+
+                ui.horizontal(|ui| {
+                    ui.label("Principal:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_simple_principal)
+                            .clamp_range(0.0..=1.0e12)
+                            .speed(10.0),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Interest rate (%):");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_simple_rate_percent)
+                            .clamp_range(0.0..=100.0)
+                            .speed(0.1),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Time horizon:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_simple_horizon_value)
+                            .clamp_range(0.0..=1.0e6)
+                            .speed(1.0),
+                    );
+                    egui::ComboBox::from_id_source("savings_simple_horizon_unit")
+                        .selected_text(self.savings_simple_horizon_unit.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.savings_simple_horizon_unit,
+                                SavingsHorizonUnit::Months,
+                                "Months",
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_simple_horizon_unit,
+                                SavingsHorizonUnit::Years,
+                                "Years",
+                            );
+                        });
+                });
+
+                if ui.button("Calculate").clicked() {
+                    let years = self
+                        .savings_simple_horizon_unit
+                        .to_years(self.savings_simple_horizon_value as f64);
+                    let fv = simple_interest_future_value(
+                        self.savings_simple_principal as f64,
+                        (self.savings_simple_rate_percent as f64) / 100.0,
+                        years,
+                    );
+                    self.savings_simple_fv = Some(fv);
+                }
+
+                if let Some(fv) = self.savings_simple_fv {
+                    ui.label(format!("Future value: ${:.2}", fv));
+                }
+            });
+
+            ui.separator();
+
+            ui.group(|ui| {
+                ui.heading("Compound Interest");
+
+                ui.horizontal(|ui| {
+                    ui.label("Initial investment:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_comp_initial_investment)
+                            .clamp_range(0.0..=1.0e12)
+                            .speed(10.0),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Regular addition:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_comp_regular_addition)
+                            .clamp_range(0.0..=1.0e12)
+                            .speed(10.0),
+                    );
+                    egui::ComboBox::from_id_source("savings_comp_regular_addition_frequency")
+                        .selected_text(self.savings_comp_regular_addition_frequency.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.savings_comp_regular_addition_frequency,
+                                ContributionFrequency::Weekly,
+                                ContributionFrequency::Weekly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_regular_addition_frequency,
+                                ContributionFrequency::BiWeekly,
+                                ContributionFrequency::BiWeekly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_regular_addition_frequency,
+                                ContributionFrequency::Monthly,
+                                ContributionFrequency::Monthly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_regular_addition_frequency,
+                                ContributionFrequency::Yearly,
+                                ContributionFrequency::Yearly.label(),
+                            );
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Interest rate (%):");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_comp_rate_percent)
+                            .clamp_range(0.0..=100.0)
+                            .speed(0.1),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Compounded:");
+                    egui::ComboBox::from_id_source("savings_comp_compounding_frequency")
+                        .selected_text(self.savings_comp_compounding_frequency.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Annually,
+                                CompoundingFrequency::Annually.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::SemiAnnually,
+                                CompoundingFrequency::SemiAnnually.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Quarterly,
+                                CompoundingFrequency::Quarterly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Monthly,
+                                CompoundingFrequency::Monthly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Weekly,
+                                CompoundingFrequency::Weekly.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_compounding_frequency,
+                                CompoundingFrequency::Daily,
+                                CompoundingFrequency::Daily.label(),
+                            );
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Time horizon:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.savings_comp_horizon_value)
+                            .clamp_range(0.0..=1.0e6)
+                            .speed(1.0),
+                    );
+                    egui::ComboBox::from_id_source("savings_comp_horizon_unit")
+                        .selected_text(self.savings_comp_horizon_unit.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.savings_comp_horizon_unit,
+                                SavingsHorizonUnit::Months,
+                                "Months",
+                            );
+                            ui.selectable_value(
+                                &mut self.savings_comp_horizon_unit,
+                                SavingsHorizonUnit::Years,
+                                "Years",
+                            );
+                        });
+                });
+
+                if ui.button("Calculate").clicked() {
+                    let years = self
+                        .savings_comp_horizon_unit
+                        .to_years(self.savings_comp_horizon_value as f64);
+                    let fv = compound_interest_future_value_with_contributions(
+                        self.savings_comp_initial_investment as f64,
+                        self.savings_comp_regular_addition as f64,
+                        self.savings_comp_regular_addition_frequency,
+                        (self.savings_comp_rate_percent as f64) / 100.0,
+                        self.savings_comp_compounding_frequency,
+                        years,
+                    );
+                    self.savings_comp_fv = Some(fv);
+                }
+
+                if let Some(fv) = self.savings_comp_fv {
+                    ui.label(format!("Future value: ${:.2}", fv));
+                }
+            });
+            });
         });
     }
 }
@@ -2775,6 +3620,7 @@ impl eframe::App for FinancerApp {
             AppState::CashflowTools => self.show_cashflow_tools(ctx),
             AppState::BondTools => self.show_bond_tools(ctx),
             AppState::MortgageTools => self.show_mortgage_tools(ctx),
+            AppState::SavingsCalculator => self.show_savings_calculator(ctx),
         }
     }
 }
