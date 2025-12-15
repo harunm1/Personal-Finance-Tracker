@@ -80,8 +80,327 @@ To meet these objectives, FinanceR will implement a well-defined set of features
 - Flexible reports: Users can generate reports based on account activity, income sources, or expense categories. Reports can be filtered by time period and granularity (daily, monthly, yearly).
 - Graphical summaries: The GUI will display pie charts for expense breakdowns, line charts for income trends, and comparative bar charts for budgets.
 
+---
 
 
+## User Guide
+
+### 1. Launching FinanceR
+FinanceR is a desktop GUI personal finance manager with secure user accounts and a local database backend.
+
+**To begin:**
+1. Run the FinanceR application.
+2. You will start on the **Login** screen.
+
+---
+
+### 2. Creating an Account (Registration)
+![FinanceR Registration Screen](images/registration.png)
+
+On the **FinanceR Registration** screen:
+1. Enter a **Username**
+2. Enter an **Email**
+3. Enter a **Password**
+4. Click **Create account**
+
+If successful, you can return to login via **Back to Login**.
+
+**Security note:** Passwords are not stored in plain text. FinanceR stores password hashes using a secure hashing algorithm.
+
+---
+
+### 3. Logging In
+![FinanceR Login Screen](images/login.png)
+
+On the **FinanceR Login** screen:
+1. Enter your **Username**
+2. Enter your **Password**
+3. Click **Login**
+
+If credentials are valid, you will be taken to the **Dashboard**.
+
+---
+
+### 4. Dashboard Overview and Navigation
+The **FinanceR Dashboard** is the home screen after login.
+
+![FinanceR Dashboard Screen](images/dashboard.png)
+
+
+It includes:
+- **Your Accounts**: a list of existing accounts and their balances.
+- **Create New Account**: create new accounts directly from the dashboard.
+- Navigation buttons:
+  - **Budgets**
+  - **Transactions**
+  - **Transfers**
+- **Planning Tools**
+  - **Bond Tools**
+  - **Mortgage Tools**
+  - **Cash Flow Tools**
+- **Logout** to return to the login screen.
+
+---
+
+### 5. Account Management
+Accounts represent financial containers such as checking or savings accounts.
+
+![FinanceR Accounts Screen](images/accounts.png)
+
+**To create a new account:**
+1. Enter an account **Name**
+2. Enter an account **Type** (e.g., Checking, Savings)
+3. Enter an initial **Balance**
+4. Click **Create Account**
+
+The account will immediately appear in **Your Accounts**, and its balance will be tracked automatically.
+
+---
+
+### 6. Transactions
+Open **Transactions** from the Dashboard to record income and expenses.
+
+![FinanceR Transactions Screen](images/transactions.png)
+
+#### Adding a Transaction
+1. Select an **Account**
+2. Enter an **Amount**
+3. Toggle **Expense** if the transaction is a cost (unchecked indicates income)
+4. Choose a **Category** (e.g., Food & Dining, Groceries, Income)
+5. Select a **Date**
+6. Click **Add Transaction**
+
+Account balances update automatically.
+
+#### Editing or Deleting Transactions
+Each transaction in the **Transaction History** includes:
+- **Edit**: modify transaction details
+- **Delete**: remove the transaction and revert its effect on balances
+
+#### Filtering Transactions
+Transaction history can be filtered by:
+- Account
+- Category
+- Date range
+- Quick filters: **This Month**, **All Time**
+
+#### Exporting Transactions
+Click **Export CSV** to download transaction data in CSV format.
+
+---
+
+### 7. Transfers
+Open **Transfers** from the Dashboard to move funds between accounts.
+
+![FinanceR Transfers Screen](images/transfers.png)
+
+
+#### Creating a Transfer
+1. Select a **From Account**
+2. Select a **To Account**
+3. Enter an **Amount**
+4. Choose a **Date**
+5. Click **Execute Transfer**
+
+Transfers update both account balances simultaneously.
+
+#### Transfer History and Export
+- View past transfers with date filtering
+- Export transfer history using **Export CSV**
+
+---
+
+### 8. Budgets
+Open **Budgets** from the Dashboard to track spending against category-based limits over configurable time periods.
+
+FinanceR supports both **quick budget creation** and **full budget configuration** using a dedicated budget editor.
+
+![FinanceR Budgets Screen](images/budgets.png)
+
+---
+
+#### Viewing Budgets
+Each existing budget displays:
+- Category name
+- Budget period (Daily, Weekly, Monthly, or Yearly)
+- Active date range
+- A progress bar showing **spent / limit**
+- Percentage of budget used
+- An **Edit** button
+
+You can navigate between time periods using:
+- **Prev**
+- **Current Period**
+- **Next**
+
+---
+
+#### Creating a Budget (Full Budget Editor)
+Click **Create Budget** to open the **Budget Editor** dialog.
+
+![FinanceR Creating a Budget Screen](images/createbudget.png)
+
+From the Budget Editor, users can:
+1. Select a **Category**
+2. Enter a **Spending Limit ($)**
+3. Choose a **Budget Period**:
+   - Daily
+   - Weekly
+   - Monthly
+   - Yearly
+4. Specify whether the budget applies to **Expenses** (expense budget toggle)
+5. Click **Save** to create the budget
+
+This method allows full control over the budget’s category, time scale, and spending constraints.
+
+---
+
+#### Quick Create Budget
+For faster setup, the **Quick Create Budget** section allows users to:
+1. Select a **Category**
+2. Enter a **Limit ($)**
+3. Click **Create**
+
+Quick-created budgets use default period settings and are useful for rapid setup.
+
+---
+
+#### Editing Budgets
+Click **Edit** next to any existing budget to reopen the **Budget Editor**, where users can:
+- Change the category
+- Adjust the spending limit
+- Modify the budget period (daily, weekly, monthly, yearly)
+- Save changes or close without saving
+
+Updates take effect immediately and refresh budget progress indicators.
+
+---
+
+#### Budget Charts
+The Budgets screen includes visual summaries to aid financial insight:
+- **Expense Breakdown** pie chart showing spending by category
+- **Income Progression** line chart illustrating income trends over the selected period
+
+
+---
+
+### 9. Planning Tools
+FinanceR includes planning utilities for long-term financial projections. All tools support saving and loading scenarios via JSON files.
+
+![FinanceR Planning Tools Screen](images/planningtools.png)
+
+---
+
+#### 9.1 Bond Tools
+The Bond Tools allow users to price fixed-income securities.
+
+![FinanceR Bond Tools Screen](images/bonds.png)
+
+**Workflow:**
+1. Specify a JSON file name (e.g., `bond_state.json`)
+2. Click **Load** to restore previous scenarios (optional)
+3. Click **Add Bond Scenario**
+4. Enter:
+   - Name
+   - Face value
+   - Coupon rate
+   - Yield to maturity
+   - Years to maturity
+   - Payments per year
+5. Click **Price All Bonds**
+
+Use **Save** to persist scenarios.
+
+---
+
+#### 9.2 Mortgage Tools
+Mortgage Tools compute payments and compare mortgage scenarios.
+
+![FinanceR Mortgage Tools Screen](images/mortgage.png)
+
+**Workflow:**
+1. Choose a JSON file (e.g., `mortgage_state.json`)
+2. Load existing scenarios (optional)
+3. Click **Add Mortgage Scenario**
+4. Enter:
+   - Name
+   - Principal
+   - Annual interest rate
+   - Term (years)
+   - Payment frequency
+5. Click **Compute All Mortgages**
+
+Scenarios can be saved and reloaded.
+
+---
+
+#### 9.3 Cash Flow Tools
+Cash Flow Tools support present/future value calculations and multi-cash-flow scenarios.
+
+![FinanceR Cash Flow Tools Screen](images/cashflow.png)
+
+**Inputs:**
+- Nominal annual interest rate
+- Inflation rate
+- Valuation date
+- Optional horizon date
+
+**Single Amount Calculation:**
+1. Enter amount, years, and compounding frequency
+2. Click **Compute single PV & FV**
+
+**Scenario-Based Cash Flows**
+
+Scenario-based cash flows allow users to evaluate the present and future value of multiple cash-flow streams under a common interest and inflation model. Each scenario represents an independent financial plan (e.g., salary payments, rent expenses, investment contributions).
+
+**Creating a Scenario**
+1. Click **Add Scenario** to create a new cash-flow scenario.
+2. Enter a descriptive **Scenario Name** to identify the plan.
+
+**Entering Cash Flows**
+- Cash flows are entered one per line using the format:'YYYY-MM-DD amount'
+- Positive values represent incoming cash (e.g., salary or investment returns).
+- Negative values represent outgoing cash (e.g., rent, expenses, loan payments).
+
+Example:
+```
+2025-01-01 3000
+2025-01-15 -1200
+2025-02-01 3000
+```
+
+**Quick Monthly Series Generator (Optional)**
+To simplify repetitive cash flows, such as monthly income or rent:
+1. Enter the **Monthly Amount**
+2. Specify a **Start Date**
+3. Select the **Number of Months**
+4. Choose the **Target Scenario**
+5. Click **Add series to selected**
+
+This automatically generates and appends a sequence of evenly spaced monthly cash flows to the selected scenario.
+
+**Computing Present and Future Values**
+Once all scenarios are defined:
+1. Click **Compute PV & FV for all scenarios**
+2. FinanceR discounts and compounds each cash flow using the specified:
+   - Nominal annual interest rate
+   - Inflation rate
+   - Valuation date
+3. The results table displays the **Present Value (PV)** and **Future Value (FV)** for each scenario, enabling direct comparison between alternative financial plans.
+
+
+---
+
+### 10. Common Usage Patterns
+- **Expense tracking**: Add transactions and review history
+- **Budget monitoring**: Set category limits and track progress
+- **Account management**: Transfer funds and monitor balances
+- **Financial planning**: Use bond, mortgage, and cash flow tools for projections
+
+---
+
+### 11. Logging Out
+Click **Logout** from the Dashboard to securely end your session and return to the login screen.
 
 ---
 
