@@ -34,41 +34,84 @@ By combining the safety and performance of Rust with an intuitive GUI, FinanceR 
 
 ## Key Features
 
-To meet these objectives, FinanceR will implement a well-defined set of features organized into categories. Each feature is designed to be modular, ensuring that development tasks can be distributed among team members while still contributing to a cohesive final product.  
+To meet these objectives, FinanceR will implement a well-defined set of features organized into categories. Each feature is designed to be modular, ensuring that development tasks can be distributed among team members while still contributing to a cohesive final product. Each feature also adds specific value in line with the defined objectives. 
 
 #### 1. User Authentication and Profiles
 
 - Multi-user access: FinanceR will support multiple users, each with a unique username and password combination. Passwords and financial data will be stored securely using hashing and encryption techniques. Additionally, each user’s financial data will be isolated to maintain privacy.
+- Secure login flow: Users authenticate through a graphical login interface with validation and error handling for incorrect credentials or duplicate usernames.
 - Onboarding flow: First-time users will be prompted to create a profile, while returning users will log in via a clean GUI login screen. Error handling will be implemented for incorrect credentials or duplicate usernames.
+
+Value: This feature enables FinanceR to function as a realistic personal finance application rather than a single-user prototype.
+
 
 #### 2. Account Management
 
 - Multiple account types: Users can create and manage various accounts such as checking, savings, credit cards, or custom-defined accounts.
 - Dashboard view: A consolidated overview of balances across all accounts will be displayed in the GUI, mirroring the layout of a typical online banking dashboard.
+- Automatic balance updates: Account balances update dynamically in response to transactions and transfers.
+
+Value: This provides users with a consolidated overview of their finances, similar to an online banking interface.
+
 
 #### 3. Transaction Management
 
-- Income and expense logging: Every financial activity can be recorded as a transaction. Transactions will include metadata such as date, amount, category, and account.
+FinanceR provides full support for recording and reviewing income and expenses.
+
+- Income and expense logging: Users can add transactions with metadata including date, amount, category, and associated account.
 - Recurring transactions: Users can define recurring expenses or income sources that will automatically update balances on a daily, weekly, or monthly basis. This ensures routine payments are tracked without manual entry.
+- Editing and deletion: Transactions can be edited or removed, with balances recalculated automatically.
+- Filtering and navigation: Transaction history can be filtered by account, category, and date range.
+- Data export: Transaction history can be exported to CSV for external analysis or record keeping.
+
 - Transfers between accounts: Support for internal transfers, such as moving money from checking to savings, distinct from external expenses or income.
 - Categorization system: Each transaction can be tagged with one or more categories. Default categories will be provided, but users will be able to define custom categories as needed.
 
+Value: These capabilities allow users to maintain accurate and flexible financial records. Separating transfers from expenses improves clarity and mirrors real-world banking behavior.
+
+
+
 #### 4. Budgeting and Expense Tracking
+
+FinanceR includes flexible budgeting tools with visual feedback.
+
 
 - Category-specific budgets: Users can set spending limits for expense categories and income targets for revenue categories.
 - Time-based tracking: Budgets can be defined on flexible timescales (daily, weekly, monthly, yearly).
-- Spending indicators: The GUI will provide visual cues (like a progress bar) when a user approaches or exceeds their budget thresholds.
-- Interactive dashboards: Users will see breakdowns of where their money is going through charts and tables, helping them make data-driven spending adjustments.
+- Budget creation options: Budgets can be created using a full budget editor or a quick-create interface.
+- Progress indicators: Each budget displays a progress bar showing the proportion of the budget that has been used.
+- Period navigation: Users can view previous, current, and upcoming budget periods.
+- Integrated charts: Expense breakdown and income progression charts provide visual summaries tied to transaction data. A pie chart shows spending by category, while a line chart illustrates income trends over time.
+
+Value: These features help users monitor spending behavior and adjust habits proactively.
 
 #### 5. Savings and Investment Tools
 
-- Savings calculator: Users can input recurring monthly contributions and project how much will be accumulated over time.
-- Investment simulator and visualization: Users can experiment with hypothetical investment scenarios by providing expected rates of return. FinanceR will generate growth curves showing projected outcomes. These tools will be supported with line and bar charts that clearly demonstrate growth over months or years, highlighting the effects of compounding.
+FinanceR includes several planning tools that support scenario-based financial analysis. All planning tools allow scenarios to be saved and loaded using JSON files.
+
+#### a) Bond Pricing Tool
+- Users can define multiple bond scenarios with parameters such as coupon rate, yield to maturity, and maturity length.
+- Bond prices are computed automatically based on the entered parameters.
+
+#### b) Mortgage Calculator
+- Users can define and compare multiple mortgage scenarios.
+- Mortgage payments are computed using principal amount, interest rate, term length, and payment frequency.
+
+#### c) Cash Flow Analysis Tool
+- Users can create named cash-flow scenarios.
+- Cash flows are entered with explicit dates and amounts, supporting both income and expenses.
+- Repetitive monthly cash flows can be generated automatically using a built-in series generator.
+- Present value and future value are computed for each scenario using interest and inflation assumptions.
+
+Value: These tools extend FinanceR beyond short-term tracking into long-term financial reasoning.
+
   
 #### 6. Reporting and Visualization
 
-- Flexible reports: Users can generate reports based on account activity, income sources, or expense categories. Reports can be filtered by time period and granularity (daily, monthly, yearly).
+- Flexible reports: Users can generate reports based on account activity, income sources, or expense categories. Reports can be filtered by time period and granularity (daily, monthly, yearly). Reports can be exported in CSV format for external analysis by the user.
 - Graphical summaries: The GUI will display pie charts for expense breakdowns and line charts for income trends.
+
+Value: Reporting and visualization features provide actionable insights into financial behavior, enabling users to make informed decisions.
 
 ## Users Guide
 
