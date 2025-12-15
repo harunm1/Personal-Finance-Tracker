@@ -79,6 +79,8 @@ FinanceR is a desktop GUI personal finance manager with secure user accounts and
 **To begin:**
 1. Run the FinanceR application.
 2. You will start on the **Login** screen.
+![FinanceR Registration Screen](images/Login_page.png)
+3. Click on the **Register** button to setup as a new User.
 
 ---
 
@@ -92,7 +94,7 @@ On the **FinanceR Registration** screen:
 3. Enter a **Password**
 4. Click **Create account**
 
-If successful, you can return to login via **Back to Login**.
+If the email is of a valid format, a new User will be created, and you will be taken back to the Login Screen.
 
 **Security note:** Passwords are not stored in plain text. FinanceR stores password hashes using a secure hashing algorithm.
 
@@ -100,7 +102,7 @@ If successful, you can return to login via **Back to Login**.
 
 ### 3. Logging In
 
-![FinanceR Login Screen](images/login.png)
+![FinanceR Login Screen](images/Login_page.png)
 
 On the **FinanceR Login** screen:
 1. Enter your **Username**
@@ -115,32 +117,33 @@ If credentials are valid, you will be taken to the **Dashboard**.
 
 The **FinanceR Dashboard** is the home screen after login.
 
-![FinanceR Dashboard Screen](images/dashboard.png)
+![FinanceR Dashboard Screen](images/homepage.png)
 
 It includes:
-- **Your Accounts**: a list of existing accounts and their balances.
-- **Create New Account**: create new accounts directly from the dashboard.
-- Navigation buttons:
-  - **Budgets**
+- **Basic Controls**: Logout, Delete User and Exit Program buttons
+- **Your Accounts**: a list of existing accounts and their balances, and a button to delete an account
+- **Create New Account**: create new accounts directly from the dashboard
+- **Accounts and Activity**:
   - **Transactions**
   - **Transfers**
+  - **Budgets**
 - **Planning Tools**
+  - **Savings Calculator**
   - **Bond Tools**
   - **Mortgage Tools**
   - **Cash Flow Tools**
-- **Logout** to return to the login screen.
 
 ---
 
 ### 5. Account Management
 
-Accounts represent financial containers such as checking or savings accounts.
+Accounts represent financial containers such as chequing or savings accounts.
 
-![FinanceR Accounts Screen](images/accounts.png)
+![FinanceR Accounts Screen](images/Accounts.png)
 
 **To create a new account:**
 1. Enter an account **Name**
-2. Enter an account **Type** (e.g., Checking, Savings)
+2. Enter an account **Type** (e.g., Chequing, Savings)
 3. Enter an initial **Balance**
 4. Click **Create Account**
 
@@ -152,9 +155,21 @@ The account will immediately appear in **Your Accounts**, and its balance will b
 
 Open **Transactions** from the Dashboard to record income and expenses.
 
-![FinanceR Transactions Screen](images/transactions.png)
+![FinanceR Transactions Screen](images/Transactions.png)
 
-#### Adding a Transaction
+#### Adding a New Transaction
+
+1. Select an **Account**
+2. Enter an **Amount**
+3. Toggle **Expense** if the transaction is a cost (unchecked indicates income)
+4. Choose a **Category** (e.g., Food & Dining, Groceries, Income)
+5. Select a **Next Run** Date and Time
+6. Select a **Frequency**
+7. Click **Add Recurring Transaction**
+
+Account balances update automatically.
+
+#### Adding a New Recurring Transaction
 
 1. Select an **Account**
 2. Enter an **Amount**
@@ -181,7 +196,7 @@ Transaction history can be filtered by:
 
 #### Exporting Transactions
 
-Click **Export CSV** to download transaction data in CSV format.
+Click **Export CSV Report** to download a transaction report in CSV format.
 
 ---
 
@@ -189,7 +204,7 @@ Click **Export CSV** to download transaction data in CSV format.
 
 Open **Transfers** from the Dashboard to move funds between accounts.
 
-![FinanceR Transfers Screen](images/transfers.png)
+![FinanceR Transfers Screen](images/Transfers.png)
 
 #### Creating a Transfer
 
@@ -198,6 +213,17 @@ Open **Transfers** from the Dashboard to move funds between accounts.
 3. Enter an **Amount**
 4. Choose a **Date**
 5. Click **Execute Transfer**
+
+Transfers update both account balances simultaneously.
+
+#### Creating a Recurring Transfer
+
+1. Select a **From Account**
+2. Select a **To Account**
+3. Enter an **Amount**
+4. Choose a **Next Run** Date and Time
+5. Select a **Frequency** from the menu
+6. Click **Add Recurring Transfer**
 
 Transfers update both account balances simultaneously.
 
@@ -290,20 +316,31 @@ The Budgets screen includes visual summaries to aid financial insight:
 
 ### 9. Planning Tools
 
-FinanceR includes planning utilities for long-term financial projections. All tools support saving and loading scenarios via JSON files.
+FinanceR includes planning utilities for long-term financial projections. The Bond, Mortgage, and Cash Flow tools support saving and loading scenarios via JSON files.
 
-![FinanceR Planning Tools Screen](images/planningtools.png)
+![FinanceR Planning Tools Screen](images/PlanningTools.png)
 
 ---
 
-#### 9.1 Bond Tools
+#### 9.1 Savings Calculator
+
+The Savings Tool allows users to project how their savings will grow.
+
+![FinanceR Bond Tools Screen](images/Savings.png)
+
+**Workflow**
+1. 
+
+---
+
+#### 9.2 Bond Tools
 
 The Bond Tools allow users to price fixed-income securities.
 
 ![FinanceR Bond Tools Screen](images/bonds.png)
 
 **Workflow:**
-1. Specify a JSON file name (e.g., `bond_state.json`)
+1. Specify a JSON file name (default: `bond_state.json`)
 2. Click **Load** to restore previous scenarios (optional)
 3. Click **Add Bond Scenario**
 4. Enter:
@@ -319,7 +356,7 @@ Use **Save** to persist scenarios.
 
 ---
 
-#### 9.2 Mortgage Tools
+#### 9.3 Mortgage Tools
 
 Mortgage Tools compute payments and compare mortgage scenarios.
 
@@ -341,7 +378,7 @@ Scenarios can be saved and reloaded.
 
 ---
 
-#### 9.3 Cash Flow Tools
+#### 9.4 Cash Flow Tools
 
 Cash Flow Tools support present/future value calculations and multi-cash-flow scenarios.
 
@@ -609,7 +646,7 @@ The development of this project provided a deeply engaging and comprehensive lea
 
 One of the most significant lessons concerned our approach to testing and development methodology. Our team did not adopt test-driven development during the early stages, opting instead to implement functionality first and introduce tests retrospectively. While this approach allowed for rapid initial development, it introduced additional complexity later when validating the system’s correctness. Writing tests after the fact revealed design shortcomings, including tightly coupled components, unclear module boundaries, and untested edge cases, which required extensive refactoring to address. For example, certain state-handling functions in the GUI relied on assumptions that were not easily decoupled for testing, necessitating the creation of additional abstractions to make the tests feasible. This experience reinforced that testing is not solely a verification mechanism but also an integral part of system design, encouraging modularity, clearer interfaces, and more deliberate architectural decisions. When combined with Rust’s strong type system, ownership model, and compile-time guarantees, adopting TDD from the beginning would likely have prevented a number of these issues, improved code correctness, and reduced technical debt, enhancing confidence in both individual components and the system as a whole. 
 
-A further lesson emerged from our experience with data modeling and database interactions. Leveraging an Object-Relational Mapping library to interface with a SQLite database greatly simplified the process of handling persistent data while also encouraging a clean and modular project structure. Expressing queries, schema definitions, and migrations directly in Rust reduced boilerplate code, allowed the compiler to catch errors early, and made the overall system easier to reason about. At the same time, our early decisions regarding core data models highlighted the importance of deliberate planning. Several Rust structs were initially defined to anticipate future features but ended up unused as the project evolved, necessitating the use of allow dead code annotations to suppress compiler warnings. This underscored the value of aligning planned models with actual system requirements and demonstrated that periodic review and refactoring of data structures is crucial to maintain clarity and reduce unnecessary complexity. Rust’s strict compiler feedback provided a continuous reminder of the need for intentional design and offered guidance for removing redundant abstractions, thereby reinforcing disciplined coding practices and emphasizing the balance between anticipating future needs and adhering to current functionality. 
+A further lesson emerged from our experience with data modeling and database interactions. Leveraging Object-Relational Mapping to interface with a SQLite database greatly simplified the process of handling persistent data while also encouraging a clean and modular project structure. Expressing queries, schema definitions, and migrations directly in Rust reduced boilerplate code, allowed the compiler to catch errors early, and made the overall system easier to reason about. At the same time, our early decisions regarding core data models highlighted the importance of deliberate planning. Several Rust structs were initially defined to anticipate future features but ended up unused as the project evolved, necessitating the use of allow dead code annotations to suppress compiler warnings. This underscored the value of aligning planned models with actual system requirements and demonstrated that periodic review and refactoring of data structures is crucial to maintain clarity and reduce unnecessary complexity. Rust’s strict compiler feedback provided a continuous reminder of the need for intentional design and offered guidance for removing redundant abstractions, thereby reinforcing disciplined coding practices and emphasizing the balance between anticipating future needs and adhering to current functionality. 
 
 Working with Rust’s graphical user interface ecosystem, particularly through the egui library, proved to be another area of substantial learning. While Rust is often associated with systems programming or backend development, building a GUI application revealed its suitability for interactive, user-facing software. The immediate-mode GUI paradigm of egui integrated naturally with Rust’s ownership and borrowing model, allowing clear management of application state while ensuring memory safety. Handling user interactions, updating the interface dynamically, and maintaining consistent state across multiple components required careful attention to explicit data flow and state encapsulation. This experience emphasized the versatility of Rust and its ability to support performant applications without compromising safety or maintainability. It also reinforced software design principles such as separation of concerns, predictability in state transitions, and careful handling of mutable data, demonstrating that Rust can serve as a strong foundation for both low-level and high-level application development.  
 
