@@ -848,7 +848,7 @@ impl FinancerApp {
         
         let mut changed = false;
         
-        egui::ComboBox::from_id_source(format!("{}_year", id_prefix))
+        egui::ComboBox::from_id_salt(format!("{}_year", id_prefix))
             .selected_text(format!("{}", year))
             .width(70.0)
             .show_ui(ui, |ui| {
@@ -863,7 +863,7 @@ impl FinancerApp {
         
         let month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        egui::ComboBox::from_id_source(format!("{}_month", id_prefix))
+        egui::ComboBox::from_id_salt(format!("{}_month", id_prefix))
             .selected_text(month_names[(month - 1) as usize])
             .width(50.0)
             .show_ui(ui, |ui| {
@@ -887,7 +887,7 @@ impl FinancerApp {
             changed = true;
         }
         
-        egui::ComboBox::from_id_source(format!("{}_day", id_prefix))
+        egui::ComboBox::from_id_salt(format!("{}_day", id_prefix))
             .selected_text(format!("{:02}", day))
             .width(45.0)
             .show_ui(ui, |ui| {
@@ -1400,7 +1400,7 @@ impl FinancerApp {
             ui.label("Category:");
             let all_categories = self.get_all_categories();
             
-            egui::ComboBox::from_id_source("budget_category")
+            egui::ComboBox::from_id_salt("budget_category")
                 .selected_text(&self.editor_category)
                 .show_ui(ui, |ui| {
                     for cat in &all_categories {
@@ -1502,7 +1502,7 @@ impl FinancerApp {
                 ui.label("Category:");
                 let all_categories = self.get_all_categories();
                 
-                egui::ComboBox::from_id_source("budget_editor_category")
+                egui::ComboBox::from_id_salt("budget_editor_category")
                     .selected_text(&self.editor_category)
                     .show_ui(ui, |ui| {
                         for cat in &all_categories {
@@ -1627,7 +1627,7 @@ impl FinancerApp {
 
             ui.horizontal(|ui| {
                 ui.label("Account:");
-                egui::ComboBox::from_id_source("tx_account_selector")
+                egui::ComboBox::from_id_salt("tx_account_selector")
                     .selected_text(
                         self.accounts_list
                             .iter()
@@ -1652,7 +1652,7 @@ impl FinancerApp {
                 ui.label("Category:");
                 let all_categories = self.get_all_categories();
                 
-                egui::ComboBox::from_id_source("tx_category_selector")
+                egui::ComboBox::from_id_salt("tx_category_selector")
                     .selected_text(&self.tx_category)
                     .show_ui(ui, |ui| {
                         for cat in &all_categories {
@@ -1741,7 +1741,7 @@ impl FinancerApp {
 
             ui.horizontal(|ui| {
                 ui.label("Account:");
-                egui::ComboBox::from_id_source("rec_tx_account_selector")
+                egui::ComboBox::from_id_salt("rec_tx_account_selector")
                     .selected_text(
                         self.accounts_list
                             .iter()
@@ -1765,7 +1765,7 @@ impl FinancerApp {
             ui.horizontal(|ui| {
                 ui.label("Category:");
                 let all_categories = self.get_all_categories();
-                egui::ComboBox::from_id_source("rec_tx_category_selector")
+                egui::ComboBox::from_id_salt("rec_tx_category_selector")
                     .selected_text(&self.recurring_tx_category)
                     .show_ui(ui, |ui| {
                         for cat in &all_categories {
@@ -1806,7 +1806,7 @@ impl FinancerApp {
 
             ui.horizontal(|ui| {
                 ui.label("Frequency:");
-                egui::ComboBox::from_id_source("rec_tx_frequency")
+                egui::ComboBox::from_id_salt("rec_tx_frequency")
                     .selected_text(self.recurring_tx_frequency.to_str())
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.recurring_tx_frequency, Period::Daily, "Daily");
@@ -2006,7 +2006,7 @@ impl FinancerApp {
             
             ui.horizontal(|ui| {
                 ui.label("Filter by Account:");
-                egui::ComboBox::from_id_source("tx_filter_account")
+                egui::ComboBox::from_id_salt("tx_filter_account")
                     .selected_text(
                         if let Some(filter_id) = self.tx_filter_account_id {
                             self.accounts_list
@@ -2029,7 +2029,7 @@ impl FinancerApp {
                 ui.separator();
                 ui.label("Filter by Category:");
                 let all_categories = self.get_all_categories();
-                egui::ComboBox::from_id_source("tx_filter_category")
+                egui::ComboBox::from_id_salt("tx_filter_category")
                     .selected_text(
                         if let Some(ref filter_cat) = self.tx_filter_category {
                             filter_cat.as_str()
@@ -2183,7 +2183,7 @@ impl FinancerApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Account:");
-                    egui::ComboBox::from_id_source("tx_editor_account_selector")
+                    egui::ComboBox::from_id_salt("tx_editor_account_selector")
                         .selected_text(
                             self.accounts_list
                                 .iter()
@@ -2201,7 +2201,7 @@ impl FinancerApp {
                 ui.horizontal(|ui| {
                     ui.label("Category:");
                     let all_categories = self.get_all_categories();
-                    egui::ComboBox::from_id_source("tx_editor_category_selector")
+                    egui::ComboBox::from_id_salt("tx_editor_category_selector")
                         .selected_text(&self.tx_editor_category)
                         .show_ui(ui, |ui| {
                             for cat in &all_categories {
@@ -2291,7 +2291,7 @@ impl FinancerApp {
 
             ui.horizontal(|ui| {
                 ui.label("From Account:");
-                egui::ComboBox::from_id_source("transfer_from_account")
+                egui::ComboBox::from_id_salt("transfer_from_account")
                     .selected_text(
                         self.accounts_list
                             .iter()
@@ -2312,7 +2312,7 @@ impl FinancerApp {
 
             ui.horizontal(|ui| {
                 ui.label("To Account:");
-                egui::ComboBox::from_id_source("transfer_to_account")
+                egui::ComboBox::from_id_salt("transfer_to_account")
                     .selected_text(
                         self.accounts_list
                             .iter()
@@ -2393,7 +2393,7 @@ impl FinancerApp {
 
             ui.horizontal(|ui| {
                 ui.label("From Account:");
-                egui::ComboBox::from_id_source("rec_transfer_from")
+                egui::ComboBox::from_id_salt("rec_transfer_from")
                     .selected_text(
                         self.accounts_list
                             .iter()
@@ -2414,7 +2414,7 @@ impl FinancerApp {
 
             ui.horizontal(|ui| {
                 ui.label("To Account:");
-                egui::ComboBox::from_id_source("rec_transfer_to")
+                egui::ComboBox::from_id_salt("rec_transfer_to")
                     .selected_text(
                         self.accounts_list
                             .iter()
@@ -2447,7 +2447,7 @@ impl FinancerApp {
 
             ui.horizontal(|ui| {
                 ui.label("Frequency:");
-                egui::ComboBox::from_id_source("rec_transfer_frequency")
+                egui::ComboBox::from_id_salt("rec_transfer_frequency")
                     .selected_text(self.recurring_transfer_frequency.to_str())
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.recurring_transfer_frequency, Period::Daily, "Daily");
@@ -2773,11 +2773,11 @@ impl FinancerApp {
                 ui.label("Amount today ($):");
                 ui.add(egui::DragValue::new(&mut self.cf_single_amount).speed(10.0));
                 ui.label("Years:");
-                ui.add(egui::DragValue::new(&mut self.cf_single_years).clamp_range(0.0..=100.0).speed(0.5));
+                ui.add(egui::DragValue::new(&mut self.cf_single_years).range(0.0..=100.0).speed(0.5));
             });
             ui.horizontal(|ui| {
                 ui.label("Compounding per year:");
-                ui.add(egui::DragValue::new(&mut self.cf_single_comp_per_year).clamp_range(1..=365));
+                ui.add(egui::DragValue::new(&mut self.cf_single_comp_per_year).range(1..=365));
 
                 if ui.button("Compute single PV & FV").clicked() {
                     let nominal = self.cf_nominal_rate_percent as f64 / 100.0;
@@ -2811,7 +2811,7 @@ impl FinancerApp {
                 ui.label("Start date (YYYY-MM-DD):");
                 ui.text_edit_singleline(&mut self.cf_gen_start_date);
                 ui.label("Months:");
-                ui.add(egui::DragValue::new(&mut self.cf_gen_months).clamp_range(1..=600));
+                ui.add(egui::DragValue::new(&mut self.cf_gen_months).range(1..=600));
             });
             ui.horizontal(|ui| {
                 ui.label("Target scenario:");
@@ -2820,7 +2820,7 @@ impl FinancerApp {
                         self.cf_selected_scenario_for_gen = self.cf_scenarios.len() - 1;
                     }
                     let current_name = &self.cf_scenarios[self.cf_selected_scenario_for_gen].name;
-                    egui::ComboBox::from_id_source("cf_gen_target_scenario")
+                    egui::ComboBox::from_id_salt("cf_gen_target_scenario")
                         .selected_text(format!("Scenario {}", current_name))
                         .show_ui(ui, |ui| {
                             for (idx, scen) in self.cf_scenarios.iter().enumerate() {
@@ -3127,7 +3127,7 @@ impl FinancerApp {
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Payments per year:");
-                                ui.add(egui::DragValue::new(&mut scen.payments_per_year).clamp_range(1..=12));
+                                ui.add(egui::DragValue::new(&mut scen.payments_per_year).range(1..=12));
                             });
                             if let Some(ref err) = scen.error {
                                 ui.colored_label(egui::Color32::RED, err);
@@ -3276,7 +3276,7 @@ impl FinancerApp {
                                 });
                                 ui.horizontal(|ui| {
                                     ui.label("Payment frequency:");
-                                    egui::ComboBox::from_id_source(format!("mort_freq_{}_{}", idx, scen.name))
+                                    egui::ComboBox::from_id_salt(format!("mort_freq_{}_{}", idx, scen.name))
                                         .selected_text(match scen.frequency {
                                         PaymentFrequency::Monthly => "Monthly",
                                         PaymentFrequency::BiWeekly => "Bi-weekly",
@@ -3415,7 +3415,7 @@ impl FinancerApp {
                     ui.label("Principal:");
                     ui.add(
                         egui::DragValue::new(&mut self.savings_simple_principal)
-                            .clamp_range(0.0..=1.0e12)
+                            .range(0.0..=1.0e12)
                             .speed(10.0),
                     );
                 });
@@ -3424,7 +3424,7 @@ impl FinancerApp {
                     ui.label("Interest rate (%):");
                     ui.add(
                         egui::DragValue::new(&mut self.savings_simple_rate_percent)
-                            .clamp_range(0.0..=100.0)
+                            .range(0.0..=100.0)
                             .speed(0.1),
                     );
                 });
@@ -3433,10 +3433,10 @@ impl FinancerApp {
                     ui.label("Time horizon:");
                     ui.add(
                         egui::DragValue::new(&mut self.savings_simple_horizon_value)
-                            .clamp_range(0.0..=1.0e6)
+                            .range(0.0..=1.0e6)
                             .speed(1.0),
                     );
-                    egui::ComboBox::from_id_source("savings_simple_horizon_unit")
+                    egui::ComboBox::from_id_salt("savings_simple_horizon_unit")
                         .selected_text(self.savings_simple_horizon_unit.label())
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
@@ -3478,7 +3478,7 @@ impl FinancerApp {
                     ui.label("Initial investment:");
                     ui.add(
                         egui::DragValue::new(&mut self.savings_comp_initial_investment)
-                            .clamp_range(0.0..=1.0e12)
+                            .range(0.0..=1.0e12)
                             .speed(10.0),
                     );
                 });
@@ -3487,10 +3487,10 @@ impl FinancerApp {
                     ui.label("Regular addition:");
                     ui.add(
                         egui::DragValue::new(&mut self.savings_comp_regular_addition)
-                            .clamp_range(0.0..=1.0e12)
+                            .range(0.0..=1.0e12)
                             .speed(10.0),
                     );
-                    egui::ComboBox::from_id_source("savings_comp_regular_addition_frequency")
+                    egui::ComboBox::from_id_salt("savings_comp_regular_addition_frequency")
                         .selected_text(self.savings_comp_regular_addition_frequency.label())
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
@@ -3520,14 +3520,14 @@ impl FinancerApp {
                     ui.label("Interest rate (%):");
                     ui.add(
                         egui::DragValue::new(&mut self.savings_comp_rate_percent)
-                            .clamp_range(0.0..=100.0)
+                            .range(0.0..=100.0)
                             .speed(0.1),
                     );
                 });
 
                 ui.horizontal(|ui| {
                     ui.label("Compounded:");
-                    egui::ComboBox::from_id_source("savings_comp_compounding_frequency")
+                    egui::ComboBox::from_id_salt("savings_comp_compounding_frequency")
                         .selected_text(self.savings_comp_compounding_frequency.label())
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
@@ -3567,10 +3567,10 @@ impl FinancerApp {
                     ui.label("Time horizon:");
                     ui.add(
                         egui::DragValue::new(&mut self.savings_comp_horizon_value)
-                            .clamp_range(0.0..=1.0e6)
+                            .range(0.0..=1.0e6)
                             .speed(1.0),
                     );
-                    egui::ComboBox::from_id_source("savings_comp_horizon_unit")
+                    egui::ComboBox::from_id_salt("savings_comp_horizon_unit")
                         .selected_text(self.savings_comp_horizon_unit.label())
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
