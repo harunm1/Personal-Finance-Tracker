@@ -251,3 +251,29 @@ All commands must be executed from the project root directory (financer)
 [1] Best budgeting apps in Canada for 2025, https://money.ca/managing-money/budgeting/best-budget-apps-canada (accessed Oct. 5, 2025). 
 
 [2] Setting_tracker - crates.io: Rust package registry, https://crates.io/crates/setting_tracker (accessed Oct. 5, 2025).
+
+## Individual Contributions
+### Khantil Desai
+* Created the base structs for the core elements of the accounting model used in this project.
+    * Created the different structs and how they interacted with each other
+    * Implemented the basic functions to interact with those struct
+    * Ensured those classes worked well with the Object-Relational-Model (ORM) used in the code
+    * This unlocked all the work to bring the whole system together with the gui and add additional features around the accounting setup
+* Developed the financial planning features
+    * These features allow users to plan for different Bond, Mortgage, and Cash Flow scenarios, and were key features promised in the Proposal.
+    * Developed the functions for calculating Present Value (PV) and Future Value of a Bond
+    * Developed the functions for calculating PV and FV of a Cash Flow
+    * Developed the functions for calculating monthly payments for Mortgages
+    * Added Unit Tests for all the above functions
+    * Develop the GUI for these financial Tools as 3 separate pages
+* Developed the Savings Calculator feature
+    * This feature allows users to calculate a simple interest scenario as well as a compounding scenario to allow them to see how their savings will grow over time. 
+        * This was one of the key features promised in the proposal
+    * Implemented the Simple and Compound Interest functions
+    * Added tests for the Simple and Compound Interest functions
+    * Created a GUI for the Savings Calculator, as a new page in the app
+* Final clean up of the code and last-minute bug fixes
+    * Added the feature to delete a User
+    * Added the feature to delete an Account
+    * Added the feature to add and delete a recurring transaction or transfer
+    * Fixed the issue of parts of the Budget, and Financial Tools page not being visible by implementing a page-wide scroll functionality in the GUI
