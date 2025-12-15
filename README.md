@@ -542,10 +542,9 @@ brew install git
 
 #### Package Manager To Install System Dependencies
 
-Homebrew is recommended to install the dependencies; however, linux users may use other package managers to install their dependencies.
-```bash
-brew install homebrew
-```
+Homebrew is recommended to install the dependencies; however, linux users may use other package managers to install their dependencies.  
+Install Homebrew by downloading it from:  
+https://brew.sh/
 
 #### Rust and Cargo
 
