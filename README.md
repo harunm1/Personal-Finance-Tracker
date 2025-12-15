@@ -371,8 +371,19 @@ The Savings Tool allows users to project how their savings will grow.
 
 ![FinanceR Bond Tools Screen](images/Savings.png)
 
-**Workflow**
-1. 
+**Simple Interest Workflow**
+1. Specify the Principal Amount
+2. Specify the Interest Rate
+3. Specify the Time Horizon
+4. Press the **Calculate** button to compute the interest
+
+**Compound Interest Workflow**
+1. Specify the Initial Investment
+2. Specfity the Regular Additions
+3. Specify the Interest Rate
+4. Specify the Compounding Period
+5. Specify the Time Horizon
+6. Press the **Calculate** button to compute the interest
 
 ---
 
