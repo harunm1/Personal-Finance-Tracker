@@ -520,7 +520,7 @@ This guide describes the steps required to set up and run the application in a r
 #### Supported Operating Systems
 
 - Linux
-- macOS (Sequoia)
+- macOS
 
 > **Note**  
 > Windows is not supported directly.  

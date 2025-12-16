@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eframe = "0.27"
-egui_plot = "0.27"
+eframe = "0.29"
+egui_plot = "0.29"
 diesel = { version = "2.3.3", features = ["sqlite"] }
 diesel_migrations = "2"
 argon2 = "0.5"
